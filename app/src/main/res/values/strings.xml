@@ -3,5 +3,6 @@
     <string-array name="xposed_scope">
         <item>com.hihonor.systemserver</item>
         <item>com.android.settings</item>
+        <item>com.android.phone</item>
     </string-array>
 </resources>

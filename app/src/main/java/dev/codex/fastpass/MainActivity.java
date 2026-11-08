@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Button;
@@ -38,11 +39,12 @@ public final class MainActivity extends Activity {
             handler.postDelayed(this, 1000L);
         }
     };
-    private TextView connection, verdict, explanation, local, cloud, bearer, raw, events, latestError;
+    private TextView connection, verdict, explanation, local, cloud, bearer, raw, events, latestError, radio, audit;
     private Button request;
     private CheckBox bypass;
     private JSONObject lastState = new JSONObject();
     private JSONArray lastEvents = new JSONArray();
+    private JSONArray requestHistory = new JSONArray();
     private String pendingId = "", displayFingerprint = "";
     private long pendingAt;
     private long lastPing;
@@ -71,6 +73,11 @@ public final class MainActivity extends Activity {
         latestError = body(status, 13); latestError.setTextColor(RED);
         Button refresh = button("刷新系统状态", false); status.addView(refresh); refresh.setOnClickListener(v -> command("refresh", true));
 
+        LinearLayout radioCard = card(column, "本机各卡槽真实 QoS（独立读取）");
+        radio = body(radioCard, 14); radio.setTextIsSelectable(true);
+        Button radioRefresh = button("读取本机 QCI / 5QI", false); radioCard.addView(radioRefresh);
+        radioRefresh.setOnClickListener(v -> refreshRadio());
+
         LinearLayout result = card(column, "本次加速承载判定");
         verdict = text("等待开始", 24, MUTED); verdict.setTypeface(null, Typeface.BOLD); result.addView(verdict);
         explanation = body(result, 14);
@@ -78,7 +85,7 @@ public final class MainActivity extends Activity {
         LinearLayout actions = card(column, "原生申请");
         TextView description = body(actions, 14);
         description.setText("使用当前上网卡申请 QCI 6 专用承载，建议时长 30 分钟。请使用 4G/5G 蜂窝网络，断开 WLAN、停用 VPN，并处于非漫游状态。");
-        bypass = new CheckBox(this); bypass.setText("仅本次绕过本地冷却与次数检查"); bypass.setTextColor(TEXT); bypass.setTextSize(14);
+        bypass = new CheckBox(this); bypass.setText("仅本次绕过 QoS 冷却与场景次数"); bypass.setTextColor(TEXT); bypass.setTextSize(14);
         bypass.setButtonTintList(android.content.res.ColorStateList.valueOf(MINT)); bypass.setChecked(getPreferences(0).getBoolean("bypass", true));
         bypass.setOnCheckedChangeListener((b, checked) -> getPreferences(0).edit().putBoolean("bypass", checked).apply()); actions.addView(bypass);
         request = button("发送一次加速请求", true); actions.addView(request); request.setOnClickListener(v -> command("request", true));
@@ -91,7 +98,8 @@ public final class MainActivity extends Activity {
 
         local = body(card(column, "本机条件与原生计数"), 14);
         cloud = body(card(column, "运营商处理与云端返回"), 14);
-        bearer = body(card(column, "真实承载 / QCI"), 14);
+        bearer = body(card(column, "本次申请的专用承载证据"), 14);
+        audit = body(card(column, "实际请求与本地计数审计"), 12); audit.setTypeface(Typeface.MONOSPACE); audit.setTextIsSelectable(true);
         raw = body(card(column, "云端响应字段"), 12); raw.setTypeface(Typeface.MONOSPACE);
         raw.setTextIsSelectable(true);
         events = body(card(column, "事件记录"), 12); events.setTextIsSelectable(true);
@@ -104,7 +112,7 @@ public final class MainActivity extends Activity {
             toast("已复制");
         });
         TextView help = body(diagnostics, 13);
-        help.setText("在 LSPosed 启用本模块，作用域勾选「系统服务」com.hihonor.systemserver 和「设置」com.android.settings，然后重启手机。\n\n本版按系统服务 70.1.0.1 与设置 14.0.0.210 的接口制作。请求通过原生服务发送；面板分别显示原始云端结果与承载证据。\n\n已确认承载激活也不等于固定幅度的提速，实际吞吐和时延需要测量。\n\n版本 1.0.0 · 适配 Android 16 / MagicOS 10");
+        help.setText("在 LSPosed 启用本模块，作用域勾选「系统服务」com.hihonor.systemserver、「设置」com.android.settings，以及「电话服务」com.android.phone，然后重启手机。\n\n本机 QoS 通过电话进程只读查询 RIL 数据连接列表。框架没有返回的 QCI/5QI 保留未知；每个数据连接可能有自己的默认 QoS 和多个会话。\n\n申请仅绕过 QoS 冷却和场景次数；公共云接口每日次数、协议同意、并发和签名检查仍沿用原生逻辑。诊断记录真实发送层参数及两类本地计数。\n\n版本 " + Protocol.VERSION + " · 系统服务 70.1.0.1 / Android 16");
         connection.setText("等待系统服务响应，请确认 LSPosed 作用域并重启。");
         explanation.setText("云端业务码 200 + 本次请求后对应卡槽的活跃专用承载回报，才判定为已确认成功。");
     }
@@ -124,8 +132,14 @@ public final class MainActivity extends Activity {
             Intent i = new Intent(Protocol.ACTION).setPackage(Protocol.TARGET);
             i.addFlags(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_RECEIVER_REGISTERED_ONLY);
             sendBroadcast(i);
+            if ("refresh".equals(type)) refreshRadio();
             readSnapshot();
         } catch (Throwable t) { if (showError) toast(String.valueOf(t.getMessage())); }
+    }
+    private void refreshRadio() {
+        Intent i = new Intent(Protocol.RADIO_ACTION).setPackage(Protocol.PHONE);
+        i.addFlags(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_RECEIVER_REGISTERED_ONLY);
+        sendBroadcast(i);
     }
     private void readSnapshot() {
         try {
@@ -133,6 +147,7 @@ public final class MainActivity extends Activity {
             if (b == null) return;
             lastState = new JSONObject(b.getString("state", "{}"));
             lastEvents = new JSONArray(b.getString("events", "[]"));
+            requestHistory = new JSONArray(b.getString("history", "[]"));
             String fingerprint = lastState.toString() + pendingId + (System.currentTimeMillis() / 5000L);
             if (!fingerprint.equals(displayFingerprint)) { displayFingerprint = fingerprint; render(); }
         } catch (Throwable t) { connection.setText("读取面板状态失败：" + t.getClass().getSimpleName()); }
@@ -142,8 +157,10 @@ public final class MainActivity extends Activity {
         long seen = s.optLong("backendSeenAt", 0);
         boolean ready = s.optBoolean("backendReady", false) && seen > 0 && System.currentTimeMillis() - seen < 120000L;
         String mismatch = value(s, "compatibilityError");
+        if (ready && !Protocol.VERSION.equals(s.optString("moduleVersion"))) mismatch = "模块后端版本尚未更新，请重启手机";
         connection.setText((ready ? "已连接原生系统服务" : "等待 LSPosed 后端")
-            + "\n后端版本：" + value(s, "backendVersion") + "\n最近响应：" + time(seen));
+            + "\n后端版本：" + value(s, "backendVersion") + "\n模块后端：" + value(s, "moduleVersion")
+            + "\n最近响应：" + time(seen));
         connection.setTextColor(ready && mismatch.isEmpty() ? MINT : AMBER);
         String commandError = value(s, "lastCommandError");
         if (!pendingId.isEmpty() && pendingId.equals(s.optString("sessionId"))) pendingId = "";
@@ -167,10 +184,17 @@ public final class MainActivity extends Activity {
                 detail = "云端返回 200，已收到活跃承载回报；但请求前已有匹配承载，或无法可靠读取请求前状态，不能把效果归因于本次申请。"; break;
             case "LOCAL_REJECTED": headline = "本地校验拒绝：" + number(s, "localCode"); color = RED;
                 detail = localMeaning(s.optInt("localCode", 0)); break;
+            case "COMMON_LOCAL_REJECTED": headline = "公共接口本地拦截：" + number(s, "commonLocalCode"); color = RED;
+                detail = s.optInt("commonLocalCode") == 101 ? "业务 1004 的本地每日调用上限已触发，本次没有进入 HTTP 发送。"
+                    : s.optInt("commonLocalCode") == 102 ? "原生公共接口的协议同意检查未通过，本次没有发给云端。"
+                    : "原生公共接口正在处理同业务请求，本次未重复提交。"; break;
             case "TELECOM_FAILED": headline = "电信鉴权失败"; color = RED;
                 detail = "原生服务未获得电信令牌，尚未完成后续荣耀云端申请。"; break;
+            case "HTTP_REJECTED": headline = "云接口 HTTP 非成功：" + number(s, "httpStatus"); color = RED;
+                detail = "这是实际 HTTP 层结果；没有把本地完成映射当作云端成功。"; break;
             case "CLOUD_REJECTED": headline = "云端非成功结果：" + number(s, "cloudCode"); color = RED;
-                detail = "展示的是原始业务返回码及消息；本地成功映射不会改变这个判定。"; break;
+                detail = s.optInt("cloudCode") == 202 ? "原生定义为超出服务有效期。具体是哪项权益或策略，当前云端消息没有说明；本地绕过不能改变该返回。"
+                    : "展示原始业务返回码及消息。"; break;
             case "TRANSPORT_UNCONFIRMED": headline = "云端响应未确认";
                 detail = "原生申请流程已回调，但没有确认的原始云端响应。即使本地完成结果为 1，也不会显示成功。"; break;
             case "BEARER_TIMEOUT": headline = "承载确认超时"; color = RED;
@@ -200,13 +224,16 @@ public final class MainActivity extends Activity {
             + "\n冷却状态：" + yes(s, "cooldownActive") + " / 错误码 " + number(s, "cooldownCode")
             + "\n冷却记录起点：" + value(s, "cooldownStart") + " / " + number(s, "cooldownMinutes") + " 分钟"
             + "\n当前基础剩余：" + number(s, "baseRemaining") + "   手动剩余：" + number(s, "manualRemaining")
-            + "\n本次校验码：" + number(s, "localCode") + "   本次绕过：" + yes(s, "bypass"));
+            + "\n失败池剩余：" + number(s, "failRemaining")
+            + "\n本次校验码：" + number(s, "localCode") + "   申请绕过：" + yes(s, "bypass")
+            + "\n实际应用 QoS 单次绕过：" + yes(s, "qosBypassApplied"));
         cloud.setText("运营商：" + value(s, "operator") + "   PLMN：" + value(s, "plmn")
             + "\n申请卡槽：" + sim(s.optInt("requestSlot", -1))
             + "\n运营商分支：" + value(s, "telecom")
             + "\n电信 HTTP：" + number(s, "telecomHttp")
             + "\n电信错误码：" + value(s, "telecomErrorCode") + "\n电信错误消息：" + value(s, "telecomErrorMessage")
             + "\n实际云端响应：" + yes(s, "cloudReceived") + "\n云端原始业务码：" + number(s, "cloudCode")
+            + "\n荣耀接口 HTTP：" + number(s, "httpStatus")
             + "\nmsg：" + value(s, "cloudMessage") + "\nremoteMessage：" + value(s, "remoteMessage")
             + "\n网络传输结果：" + value(s, "cloudTransport")
             + "\n原生完成映射：" + number(s, "nativeResult") + "（仅供参考）"
@@ -233,14 +260,78 @@ public final class MainActivity extends Activity {
             .append("\n本次收到新回报：").append(yes(s, "bearerFresh"))
             .append("\n本次匹配承载活跃：").append(yes(s, "bearerActive"));
         bearer.setText(bs.toString());
+        renderRadio(s);
+        JSONObject actual = s.optJSONObject("requestAudit");
+        JSONObject auditView = new JSONObject().put("actualHttpRequest", actual == null ? new JSONObject() : actual)
+            .put("preflight", s.optJSONObject("preflight"))
+            .put("qosQuotaBefore", s.optJSONObject("quotaBefore")).put("qosQuotaAfter", s.optJSONObject("quotaAfter"))
+            .put("commonCloudChecks", s.optJSONObject("commonCloudChecks"))
+            .put("commonCloudBudgetNow", s.optJSONObject("commonCloudBudget"));
+        audit.setText((actual != null && actual.optBoolean("captured") ? "已捕获本次实际 HTTP 对象（令牌、设备标识和 IP 已脱敏）"
+            : "尚未到实际 HTTP 发送层；不能用构造参数冒充已发送参数")
+            + "\n\n" + auditView.toString(2)
+            + "\n\n通用调用次数另有 CHR 统计落库，云端是否使用统计无法由客户端证明。云端也可独立按设备、令牌、IP 等校验权益和频次。");
         String rawValue = value(s, "cloudRaw");
-        raw.setText(rawValue.isEmpty() ? "尚未收到本次云端响应字段" : new JSONObject(rawValue).toString(2));
+        raw.setText(new JSONObject().put("httpEvidence", s.optJSONObject("httpResponse"))
+            .put("nativeParsedResponse", rawValue.isEmpty() ? JSONObject.NULL : new JSONObject(rawValue)).toString(2));
         StringBuilder log = new StringBuilder();
         for (int i = lastEvents.length() - 1; i >= Math.max(0, lastEvents.length() - 70); i--) {
             JSONObject e = lastEvents.getJSONObject(i);
             log.append(time(e.optLong("time"))).append("  ").append(e.optString("text")).append("\n\n");
         }
         events.setText(log.length() == 0 ? "等待事件" : log.toString());
+    }
+    private void renderRadio(JSONObject s) {
+        StringBuilder out = new StringBuilder();
+        long seen = s.optLong("radioSeenAt");
+        if (seen == 0 || !s.optBoolean("radioReady")) {
+            out.append("电话进程尚未就绪。请在 LSPosed 额外勾选 com.android.phone，重启后读取。\n");
+        } else out.append("电话进程最近响应：").append(time(seen)).append("\n");
+        if (!value(s, "radioError").isEmpty()) out.append("读取状态：").append(value(s, "radioError")).append("\n");
+        JSONArray slots = s.optJSONArray("radioSlots");
+        String activeIface = s.optString("radioActiveCellularInterface", "");
+        if (slots != null) for (int i = 0; i < slots.length(); i++) {
+            JSONObject slot = slots.optJSONObject(i); if (slot == null) continue;
+            out.append("\n").append(sim(slot.optInt("slot", -1))).append(" · ").append(slot.optString("source", ""))
+                .append("\n回报时间：").append(time(slot.optLong("receivedAt")));
+            if (slot.optBoolean("pending")) out.append("\n正在执行只读查询；下方为此前回报");
+            if (!slot.optString("error", "").isEmpty()) out.append("\n此次读取：").append(slot.optString("error")).append("；下方保留上次回报");
+            JSONArray calls = slot.optJSONArray("calls");
+            if (calls == null || calls.length() == 0) { out.append("\n未收到数据连接条目，QCI/5QI 未知\n"); continue; }
+            for (int n = 0; n < calls.length(); n++) {
+                JSONObject call = calls.optJSONObject(n); if (call == null) continue;
+                String iface = call.optString("interface", "");
+                out.append("\n\n连接 CID ").append(number(call, "cid")).append(" · ").append(iface)
+                    .append(!activeIface.isEmpty() && activeIface.equals(iface) ? "（系统默认蜂窝接口）" : "")
+                    .append("\n连接状态：").append(number(call, "linkStatus")).append(" / cause ").append(number(call, "cause"))
+                    .append("\n该连接默认 QoS：").append(qosText(call.optJSONObject("defaultQos")));
+                JSONArray sessions = call.optJSONArray("qosSessions");
+                if (sessions != null) for (int q = 0; q < sessions.length(); q++) {
+                    JSONObject session = sessions.optJSONObject(q); if (session != null) out.append("\n会话 ")
+                        .append(number(session, "sessionId")).append("：").append(qosText(session.optJSONObject("qos")));
+                }
+                if (!call.optBoolean("sessionsApiAvailable")) out.append("\nQoS 会话接口不可用");
+                if (sessions != null && call.optInt("qosSessionsTotal") > sessions.length()) out.append("\n会话数量超过展示上限，仅显示前 8 条");
+            }
+            out.append("\n");
+            if (slot.optInt("callsTotal") > calls.length()) out.append("数据连接超过展示上限，仅显示前 16 条\n");
+        }
+        JSONArray vendor = s.optJSONArray("vendorSlots");
+        out.append("\n荣耀专用承载消息 105 / 2001：");
+        if (vendor == null || vendor.length() == 0) out.append("尚无回报");
+        else for (int i = 0; i < vendor.length(); i++) {
+            JSONObject v = vendor.optJSONObject(i); if (v == null) continue;
+            long age = SystemClock.elapsedRealtime() - v.optLong("receivedElapsed");
+            out.append("\n").append(sim(v.optInt("slot", -1))).append(" · ").append(age >= 0 ? age / 1000 + " 秒前" : "旧启动记录")
+                .append("\n").append(v.optJSONArray("bearers"));
+        }
+        out.append("\n\nQCI/5QI 由网络分配，手机读取。同一卡可有多个数据连接；LTE QCI 与 NR 5QI 分别展示。未返回字段时不推测数值。");
+        radio.setText(out.toString());
+    }
+    private static String qosText(JSONObject q) {
+        if (q == null) return "未知";
+        if (!q.optBoolean("available")) return "未知（" + q.optString("reason", "未提供") + (q.has("value") ? "，原值 " + q.opt("value") : "") + "）";
+        return ("NR_5QI".equals(q.optString("kind")) ? "NR 5QI = " : "LTE QCI = ") + q.optInt("value");
     }
     private static String value(JSONObject o, String key) { return o.isNull(key) ? "" : o.optString(key, ""); }
     private static String number(JSONObject o, String key) { String s = value(o, key); return s.isEmpty() ? "未知" : s; }
@@ -259,9 +350,11 @@ public final class MainActivity extends Activity {
         }
     }
     private String diagnostic() {
-        try { return new JSONObject().put("app", "FastPass Observer 1.0.0")
+        try { return new JSONObject().put("app", "FastPass Observer " + Protocol.VERSION)
             .put("device", Build.MODEL).put("sdk", Build.VERSION.SDK_INT)
-            .put("exportedAt", System.currentTimeMillis()).put("state", lastState).put("events", lastEvents).toString(2); }
+            .put("exportedAt", System.currentTimeMillis()).put("timeZone", java.util.TimeZone.getDefault().getID())
+            .put("elapsedRealtime", SystemClock.elapsedRealtime()).put("state", lastState)
+            .put("requestHistory", requestHistory).put("events", lastEvents).toString(2); }
         catch (Exception e) { return "Unable to build diagnostics: " + e; }
     }
     private void export() {

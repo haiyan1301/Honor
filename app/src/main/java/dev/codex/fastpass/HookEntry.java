@@ -12,6 +12,13 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam p) throws Throwable {
+        if (Protocol.PHONE.equals(p.packageName) && Protocol.PHONE.equals(p.processName)) {
+            XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    PhoneBackend.attach((Context) param.args[0], p.classLoader);
+                }
+            });
+        }
         if (Protocol.TARGET.equals(p.packageName) && Protocol.TARGET.equals(p.processName)) {
             XposedHelpers.findAndHookMethod("com.hihonor.systemserver.HwServerApplication", p.classLoader,
                 "onCreate", new XC_MethodHook() {

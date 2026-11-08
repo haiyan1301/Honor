@@ -25,20 +25,46 @@ public final class BridgeProvider extends ContentProvider {
     }
     private JSONObject state() throws Exception { return new JSONObject(prefs.getString("state", "{}")); }
     @Override public synchronized Bundle call(String method, String arg, Bundle extras) {
-        trusted("enqueue".equals(method) || "clearLog".equals(method));
+        boolean radioPublisher = "publishRadio".equals(method);
+        if (radioPublisher) {
+            int uid = Binder.getCallingUid();
+            if (uid != 1001 && uid != 1000 && uid != 0) throw new SecurityException("Phone publisher only");
+        } else trusted("enqueue".equals(method) || "clearLog".equals(method));
         Bundle result = new Bundle();
         try {
             if ("snapshot".equals(method)) {
                 result.putString("state", prefs.getString("state", "{}"));
                 result.putString("events", prefs.getString("events", "[]"));
-            } else if ("publish".equals(method)) {
-                if (Binder.getCallingUid() != 1000 && Binder.getCallingUid() != 0) throw new SecurityException("System publisher only");
+                result.putString("history", prefs.getString("history", "[]"));
+            } else if ("publish".equals(method) || radioPublisher) {
+                if (!radioPublisher && Binder.getCallingUid() != 1000 && Binder.getCallingUid() != 0) throw new SecurityException("System publisher only");
                 JSONObject base = state();
                 JSONObject patch = new JSONObject(extras == null ? "{}" : extras.getString("patch", "{}"));
                 java.util.Iterator<String> it = patch.keys();
-                while (it.hasNext()) { String k = it.next(); base.put(k, patch.get(k)); }
+                while (it.hasNext()) {
+                    String k = it.next();
+                    if (radioPublisher && !k.startsWith("radio")) throw new SecurityException("Radio namespace only");
+                    base.put(k, patch.get(k));
+                }
                 base.put("updatedAt", System.currentTimeMillis());
                 SharedPreferences.Editor edit = prefs.edit().putString("state", base.toString());
+                if (!radioPublisher && !patch.optString("sessionId", "").isEmpty()) {
+                    JSONArray previous = new JSONArray(prefs.getString("history", "[]")), history = new JSONArray();
+                    for (int i = 0; i < previous.length(); i++) {
+                        JSONObject old = previous.optJSONObject(i);
+                        if (old != null && !patch.optString("sessionId").equals(old.optString("sessionId"))) history.put(old);
+                    }
+                    history.put(patch);
+                    JSONArray recent = new JSONArray();
+                    int start = history.length(), characters = 0;
+                    while (start > 0 && history.length() - start < 6) {
+                        int n = history.getJSONObject(start - 1).toString().length();
+                        if (characters + n > 120000) break;
+                        characters += n; start--;
+                    }
+                    for (int i = start; i < history.length(); i++) recent.put(history.get(i));
+                    edit.putString("history", recent.toString());
+                }
                 if (extras != null && extras.containsKey("event")) {
                     JSONArray log = new JSONArray(prefs.getString("events", "[]"));
                     JSONObject row = new JSONObject();
@@ -46,7 +72,14 @@ public final class BridgeProvider extends ContentProvider {
                     row.put("text", extras.getString("event", ""));
                     log.put(row);
                     JSONArray trimmed = new JSONArray();
-                    for (int i = Math.max(0, log.length() - 160); i < log.length(); i++) trimmed.put(log.get(i));
+                    int characters = 0;
+                    int start = log.length();
+                    while (start > 0 && log.length() - start < 300) {
+                        int n = log.getJSONObject(start - 1).toString().length();
+                        if (characters + n > 180000) break;
+                        characters += n; start--;
+                    }
+                    for (int i = start; i < log.length(); i++) trimmed.put(log.get(i));
                     edit.putString("events", trimmed.toString());
                 }
                 edit.apply();

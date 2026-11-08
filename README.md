@@ -1,24 +1,27 @@
-# 荣耀优速通观察台 1.0.0
+# 荣耀优速通观察台 1.1.0
 
 ## 下载
 
-- [下载 APK（1.0.0）](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.0.0.apk)
-- [下载源码包](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.0.0-source.zip)
-- [SHA-256 校验值](downloads/SHA256SUMS.txt)
-- [构建验证记录](downloads/verification.json)
+- [下载 APK 1.1.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.1.0.apk)
+- [下载源码包 1.1.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.1.0-source.zip)
+- [请求参数、两类本地计数与 QCI 的反编译核对](docs/request-audit.md)
+- [SHA-256 校验值](downloads/SHA256SUMS.txt) / [验证记录](downloads/verification-1.1.0.json)
 
-已完成编译、APK 签名验证、34 项判定测试及 58 项原生接口静态核对。尚未实机验证 LSPosed 注入、移动或电信的真实申请。
+升级后请在 LSPosed 额外勾选电话服务 `com.android.phone` 并重启。新增普通承载读取及 HTTP 审计尚需本机实测；1.0.0 安装包和源码包保留在 downloads 目录。
+
+本地验证：38 项判定测试、31 项请求/无线证据测试、76 项原生接口静态核对通过；与 1.0.0 签名一致。
 
 面向此次提供的 Magic7 Pro / Android 16 / MagicOS 10，以及系统服务 `com.hihonor.systemserver 70.1.0.1`、设置 `14.0.0.210` 制作的 LSPosed 模块。
 
 ## 安装与使用
 
 1. 安装 APK，打开一次“优速通观察台”。
-2. 在 LSPosed 启用模块，作用域勾选系统服务 `com.hihonor.systemserver` 和设置 `com.android.settings`。
+2. 在 LSPosed 启用模块，作用域勾选系统服务 `com.hihonor.systemserver`、设置 `com.android.settings`，以及电话服务 `com.android.phone`。从 1.0.0 升级也需要额外勾选电话服务并重启。
 3. 重启手机，再打开面板，点击“刷新系统状态”。
 4. 使用当前上网卡的 4G/5G 蜂窝网络；断开 WLAN、停用 VPN，并处于非漫游状态。
-5. 保持“仅本次绕过本地冷却与次数检查”勾选，点击“发送一次加速请求”。等待最多约 120 秒观察结果。
-6. 可用“导出诊断文件”保存原始业务返回码、脱敏消息、承载列表和事件记录。
+5. 可先点击“读取本机 QCI / 5QI”，不发送加速申请、不消耗加速申请次数。
+6. 按需勾选“仅本次绕过 QoS 冷却与场景次数”，点击“发送一次加速请求”，等待最多约 120 秒观察结果。
+7. 可用“导出诊断文件”保存完整证据：最近 6 次请求快照、最多 300 条事件（另有总长度限制）、实际出站字段、请求前后两类计数、原始 HTTP/业务响应与各卡槽 QoS。
 
 系统设置的“移动网络”页会增加“荣耀优速通 · 观察台”入口；面板也提供打开原生优速通页面的按钮。
 
@@ -36,13 +39,21 @@
 
 请求通过目标进程中的 `QosManager.requestDedicatedBearer(DBRequestInfo, Message)` 发送。模块从原生状态读取卡槽、PLMN、网络制式、蜂窝 IPv4/IPv6，构造 Manual / QCI 6 / 建议 30 分钟请求。令牌获取、云端通信和原生请求头都由荣耀服务处理。
 
-本地绕过只在面板主动发起的这一次同步校验中生效，跳过本地冷却和当日次数检查；不修改持久化的冷却记录，不全局改变原生业务检查。有效参数、服务已启动、并发任务和同类 IP/QCI 重复请求检查保留。
+本地绕过只在面板主动发起的这一次同步校验中生效，跳过 `QosTimer` 冷却和 `Base/Manual` 场景次数检查。原生完成逻辑仍会更新失败池、次数及冷却；诊断记录请求前后值。
+
+公共云请求执行器另有业务号 `1004` 的每日接口调用次数。该层及协议同意、并发、签名检查保留，并分别显示。未进入 HTTP 的本地拒绝不会标成云端拒绝。详见 [请求与计数反编译核对](docs/request-audit.md)。
+
+有效参数、服务已启动、并发任务和同类 IP/QCI 重复请求检查保留。模块不修改设备标识、令牌、场景或签名来伪造云端权益。
 
 本地服务期或场景触发逻辑没有参与本面板直接调用路径。模块仍要求有效的蜂窝数据、原生 IPv4 和 4G/5G 条件。不会自动循环发送请求。
 
 只有后端版本为 `70.1.0.1` 且关键接口 Hook 就绪时才允许发起请求；版本不匹配时保留观察并显示原因。
 
 ## 判定与原始证据
+
+“本机各卡槽真实 QoS”独立于申请结果。从电话进程通过 `CommandsInterface.getDataCallList(Message)` 主动只读查询，并监听数据连接变化。每条数据连接分别展示 `DataCallResponse.getDefaultQos()` 和 `getQosBearerSessions()` 的实际字段：LTE 为 QCI，NR 为 5QI；两者不相互冒充。当前系统默认蜂窝接口能匹配时单独标记，其它数据连接可能包含 IMS 等业务。
+
+RIL 或供应商实现可以不返回 QoS 对象。空值、字段缺失、接口异常或无连接时均显示未知，不假设 QCI=9，也不把申请参数 QCI=6 作为实际值。该标准路径已核对 Android 16 AOSP 接口；尚未取得本机电话框架 APK/JAR 或对新路径进行实机验证。荣耀专用消息 `105/2001` 继续作为独立证据展示。
 
 “已确认承载激活”需要同时满足：
 
@@ -59,12 +70,14 @@
 
 “停止本次观察”停止面板对该请求的观察；已发出的网络申请仍由原生服务处理。模块在系统存在其它活跃专用承载时保留监测，避免干扰原生服务。
 
-该判定确认的是与荣耀原生规则一致的承载激活证据，实际吞吐和时延改善需测量。云端是否允许服务、是否仍返回 202 等由服务端决定。
+该判定确认的是与荣耀原生规则一致的专用承载激活证据，实际吞吐和时延改善需测量。云端是否允许服务、是否仍返回 202 等由服务端决定。202 在原生常量中定义为超出服务有效期；缺少服务端说明时，无法进一步确定是哪项权益或策略。
+
+请求审计来自实际原生 HTTP 对象，按 applyId 对应本次请求，记录脱敏 body/headers、候选计数字段名、设备发送时间、签名时间戳、默认网络和卡槽。收到原生 HTTP 回调时，保留反序列化前的 JSON 字段；HTTP 非 200 的原生未使用错误流也尝试限量读取。返回 duration=0 会如实显示 0，不沿用建议 30 分钟冒充返回时长。
 
 ## 诊断与权限
 
 - APK 本身不申请互联网或存储访问权限；网络申请在已授权的荣耀原生系统服务内执行。
-- 控制广播要求模块自定义的签名权限。诊断 Provider 只允许模块自身、平台 UID 1000 和 root UID；只有模块自身能够排入界面操作命令。
+- 控制广播要求模块自定义的签名权限。诊断 Provider 的系统桥接只允许模块自身、平台 UID 1000 和 root UID；电话 UID 1001 仅可写入 `radio` 命名空间。只有模块自身能够排入加速操作命令。
 - 电信成功令牌不读入面板、不写入诊断文件。云端详情仅保留业务码、duration、msg、remoteMessage 和传输状态，并对常见凭证字段脱敏。
 - 未直接使用 `su`、未修改系统 APK，也不依赖终端挂载视图，因此适用于此次 KernelSU 环境。
 
@@ -81,8 +94,8 @@ python3 build.py --android-jar /path/to/android.jar \
   --key /path/to/key.pk8 --cert /path/to/cert.pem
 ```
 
-构建过程执行 `tests/OutcomePolicyTest.java`，验证原生成功映射、云端失败、旧承载、其它卡槽、不同承载类型、确认超时，以及移动/电信分支等判据。
+构建过程执行 `tests/OutcomePolicyTest.java`。额外传入 `--json-test-jar /path/to/json-20240303.jar` 可执行 `tests/AuditRadioTest.java`，验证 LTE/NR 区分、缺失 QoS、默认与专用会话的区分、真实参数与其它请求隔离、计数字段发现及凭证脱敏。该测试 JAR 不打进 APK。
 
 ## 验证范围
 
-本环境完成编译、领域判定测试、APK 签名验证和对上传 DEX 的接口静态核对。本环境没有连接用户手机，尚未实机验证 LSPosed 注入和运营商真实申请。首次使用请导出诊断文件核对。
+本环境完成编译、判定/参数/无线证据测试、APK 签名验证和对上传 DEX 的接口静态核对。1.0.0 的实机诊断已确认系统服务注入、本地 QoS 绕过、电信取令牌和云端业务拒绝链路；1.1.0 的新增电话进程及 HTTP 审计观察点仍需实机验证。本环境没有连接用户手机。首次升级请导出诊断文件核对。

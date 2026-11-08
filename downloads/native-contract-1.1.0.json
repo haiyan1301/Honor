@@ -1,0 +1,382 @@
+[
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "getInstance()Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "requestDedicatedBearer(Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;Landroid/os/Message;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "checkIfQosReqLegal(Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;)I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "doWhenQosSuccess(Lcom/hihonor/systemserver/booster/framework/cloudinter/common/CloudTaskResult;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "handleTelecomReturn(Landroid/os/AsyncResult;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "isDBWorking(I)Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "method": "isQosEnabled()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;",
+    "method": "<init>(Ljava/lang/String;IILcom/hihonor/systemserver/booster/framework/intf/intelligent/QosConst$Scene;Lcom/hihonor/systemserver/booster/framework/intf/intelligent/QosConst$Cause;Ljava/lang/String;Ljava/util/List;I)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;",
+    "method": "setIpv6(Ljava/lang/String;)Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;",
+    "method": "getApplyId()Ljava/lang/String;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;",
+    "method": "checkParamIllegal()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer;",
+    "method": "getInstance()Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer;",
+    "method": "hasExistIp(Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;)Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/common/OllieFeature;",
+    "method": "isStart()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosConfig;",
+    "method": "getTokenAppid()Ljava/util/Map;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosRequest;",
+    "method": "getDBRequestInfo()Lcom/hihonor/systemserver/booster/framework/intf/intelligent/DBRequestInfo;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosRequest;",
+    "method": "generateHeaders()Ljava/util/HashMap;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/CloudReqTaskExecutor;",
+    "method": "getInstance()Lcom/hihonor/systemserver/booster/framework/intf/CloudReqTaskExecutor;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/CloudReqTaskExecutor;",
+    "method": "executeTask(Lcom/hihonor/systemserver/booster/framework/cloudinter/common/RequestBody;Landroid/os/Message;Lcom/hihonor/systemserver/booster/framework/intf/ISaveCloudData;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/CloudReqTaskExecutor;",
+    "method": "isExceedMaxInterTimes(I)Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/config/CloudInterConfigManager;",
+    "method": "getInstance()Lcom/hihonor/systemserver/booster/framework/cloudinter/common/config/CloudInterConfigManager;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/config/CloudInterConfigManager;",
+    "method": "getConfigInfo(I)Lcom/hihonor/systemserver/booster/framework/cloudinter/common/config/CloudInterConfigInfo;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/config/CloudInterConfigInfo;",
+    "method": "getDailyMaxInteractTimes()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/utils/DateUtils;",
+    "method": "getCurrentDay()Ljava/lang/String;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpRequest;",
+    "method": "request(Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpResponse;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpRequest;",
+    "method": "handleResponse(Ljavax/net/ssl/HttpsURLConnection;Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpResponse;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/CloudReqTask;",
+    "method": "@signature(ILjava/lang/String;[B)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/transportlayer/feature/transportlayerselfcure/dataacceleration/QosAppInfo;",
+    "method": "getSwitchState()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "getDefaultDataSlotId()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "getQosPeriodStatus()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "isDataOn()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "isWifiConnected()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "isVpnModeSwitchOn()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "isDataRoaming(I)Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "getCellularIpv4Addr(I)Ljava/net/Inet4Address;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "getCellularIpv6Addr(I)Ljava/net/Inet6Address;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "isNetworkType4G(I)Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/OllieStateManager;",
+    "method": "isNetworkTypeSaNsaEnDcActive(I)Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/utils/BoosterUtils;",
+    "method": "convertSlotIdToSubId(I)I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/utils/BoosterUtils;",
+    "method": "getTelephonyManager()Landroid/telephony/TelephonyManager;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/utils/BoosterUtils;",
+    "method": "isDomesticVersion()Z",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/transportlayer/framework/intf/link/LinkLayerProxy;",
+    "method": "reportDedicatedBearRequest(II)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/transportlayer/framework/intf/link/LinkLayerProxy;",
+    "method": "getDedicatedBearInfoList(I)Ljava/util/List;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/transportlayer/framework/channelmanage/communication/client/BoosterClient;",
+    "method": "handleDedicatedBearerInfoInd(Landroid/os/Bundle;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/booster/protobuf/DedicatedBearerInfoIndOuterClass$DedicatedBearerInfoInd;",
+    "method": "parseFrom([B)Lcom/hihonor/booster/protobuf/DedicatedBearerInfoIndOuterClass$DedicatedBearerInfoInd;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/booster/protobuf/DedicatedBearerInfoIndOuterClass$DedicatedBearerInfoInd;",
+    "method": "getDedicatedBearerInfoList()Ljava/util/List;",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/booster/protobuf/DedicatedBearerInfoIndOuterClass$BearerInfo;",
+    "method": "getQci()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/booster/protobuf/DedicatedBearerInfoIndOuterClass$BearerInfo;",
+    "method": "getBearerType()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/booster/protobuf/DedicatedBearerInfoIndOuterClass$BearerInfo;",
+    "method": "getBearerState()I",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "field": "dbRequestInfo",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosManager;",
+    "field": "isTaskExecuting",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer;",
+    "field": "punishTimerCache",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer;",
+    "field": "sceneTime",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer;",
+    "field": "isPunishDuration",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer$TimerCache;",
+    "field": "error",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer$TimerCache;",
+    "field": "startTime",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosTimer$TimerCache;",
+    "field": "duration",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosResponse;",
+    "field": "code",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosResponse;",
+    "field": "duration",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosResponse;",
+    "field": "msg",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/ollie/intelligent/qos/QosResponse;",
+    "field": "remoteMessage",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/intf/CloudReqTaskExecutor;",
+    "field": "INTER_TIMES_CACHE_MAP",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/CloudReqTask;",
+    "field": "requestBody",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpRequest;",
+    "field": "url",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpRequest;",
+    "field": "body",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpRequest;",
+    "field": "heads",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/booster/framework/cloudinter/common/HttpRequest;",
+    "field": "auth",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/systemserver/HwServerApplication;",
+    "method": "onCreate()V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/android/settings/WirelessSettings;",
+    "method": "onCreate(Landroid/os/Bundle;)V",
+    "ok": true
+  },
+  {
+    "class": "Lcom/hihonor/settingslib/preference/ArrowPreference;",
+    "method": "<init>(Landroid/content/Context;)V",
+    "ok": true
+  },
+  {
+    "class": "Landroidx/preference/Preference;",
+    "method": "setKey(Ljava/lang/String;)V",
+    "ok": true
+  },
+  {
+    "class": "Landroidx/preference/Preference;",
+    "method": "setTitle(Ljava/lang/CharSequence;)V",
+    "ok": true
+  },
+  {
+    "class": "Landroidx/preference/Preference;",
+    "method": "setSummary(Ljava/lang/CharSequence;)V",
+    "ok": true
+  },
+  {
+    "class": "Landroidx/preference/Preference;",
+    "method": "setOrder(I)V",
+    "ok": true
+  },
+  {
+    "class": "Landroidx/preference/Preference;",
+    "method": "setIntent(Landroid/content/Intent;)V",
+    "ok": true
+  },
+  {
+    "class": "Landroidx/preference/PreferenceGroup;",
+    "method": "addPreference(Landroidx/preference/Preference;)Z",
+    "ok": true
+  }
+]

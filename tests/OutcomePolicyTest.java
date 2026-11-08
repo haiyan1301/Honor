@@ -48,6 +48,14 @@ public final class OutcomePolicyTest {
         check("old report cannot establish a baseline", !OutcomePolicy.reliableBaseline(1000, 6001));
         check("missing report cannot establish a baseline", !OutcomePolicy.reliableBaseline(0, 1000));
         check("future report cannot establish a baseline", !OutcomePolicy.reliableBaseline(1001, 1000));
+        e = request(); e.httpStatus = 403;
+        result("real HTTP denial is not native timeout success", OutcomePolicy.Result.HTTP_REJECTED, e);
+        e.httpStatus = 200; e.cloudReceived = true; e.cloudCode = 202;
+        result("HTTP200 does not override business202", OutcomePolicy.Result.CLOUD_REJECTED, e);
+        e = request(); e.commonLocalCode = 101;
+        result("shared local quota failure is not a cloud response", OutcomePolicy.Result.COMMON_LOCAL_REJECTED, e);
+        e.commonLocalCode = 1004;
+        result("shared local check passed keeps waiting", OutcomePolicy.Result.WAITING, e);
         check("active dedicated QCI6", OutcomePolicy.matches(2, 6, 1, 6));
         check("VIP QCI6 is not requested dedicated bearer", !OutcomePolicy.matches(1, 6, 1, 6));
         check("wrong QCI", !OutcomePolicy.matches(2, 4, 1, 6));

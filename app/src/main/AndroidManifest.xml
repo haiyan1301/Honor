@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:versionCode="1" android:versionName="1.0.0">
+    android:versionCode="2" android:versionName="1.1.0">
     <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="36"/>
     <permission android:name="dev.codex.fastpass.permission.CONTROL" android:protectionLevel="signature"/>
     <uses-permission android:name="dev.codex.fastpass.permission.CONTROL"/>
     <queries>
         <package android:name="com.android.settings"/>
         <package android:name="com.hihonor.systemserver"/>
+        <package android:name="com.android.phone"/>
     </queries>
     <application android:label="优速通观察台" android:icon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"

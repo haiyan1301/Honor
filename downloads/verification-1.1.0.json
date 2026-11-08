@@ -1,0 +1,27 @@
+{
+  "package": "dev.codex.fastpass",
+  "version": "1.1.0",
+  "versionCode": 2,
+  "label": "优速通观察台",
+  "minSdk": "33",
+  "targetSdk": "36",
+  "permissions": [
+    "dev.codex.fastpass.permission.CONTROL"
+  ],
+  "sha256": "dec4315037b1320e15337c609fd0416ef1af5a30e8fac57ba17587238468c728",
+  "bytes": 57885,
+  "signature_v3": true,
+  "same_signer_as_1_0_0": true,
+  "domain_checks": 38,
+  "wire_radio_checks": 31,
+  "native_contract_checks": 76,
+  "aosp_phone_signatures_checked": true,
+  "honor_phone_framework_provided": false,
+  "device_tested_1_1_0": false,
+  "device_log_confirmed_1_0_0": [
+    "systemserver_hook",
+    "qos_local_bypass",
+    "telecom_token_success",
+    "cloud_business_rejection_202"
+  ]
+}

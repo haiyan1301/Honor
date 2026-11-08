@@ -36,6 +36,17 @@ checks = {
   timer: ['getInstance()'+timer, 'hasExistIp('+req+')Z'],
   root+'ollie/common/OllieFeature;': ['isStart()Z'],
   root+'ollie/intelligent/qos/QosConfig;': ['getTokenAppid()Ljava/util/Map;'],
+  root+'ollie/intelligent/qos/QosRequest;': ['getDBRequestInfo()'+req, 'generateHeaders()Ljava/util/HashMap;'],
+  root+'framework/intf/CloudReqTaskExecutor;': ['getInstance()'+root+'framework/intf/CloudReqTaskExecutor;',
+      'executeTask('+root+'framework/cloudinter/common/RequestBody;Landroid/os/Message;'+root+'framework/intf/ISaveCloudData;)V',
+      'isExceedMaxInterTimes(I)Z'],
+  root+'framework/cloudinter/common/config/CloudInterConfigManager;': ['getInstance()'+root+'framework/cloudinter/common/config/CloudInterConfigManager;',
+      'getConfigInfo(I)'+root+'framework/cloudinter/common/config/CloudInterConfigInfo;'],
+  root+'framework/cloudinter/common/config/CloudInterConfigInfo;': ['getDailyMaxInteractTimes()I'],
+  root+'framework/utils/DateUtils;': ['getCurrentDay()Ljava/lang/String;'],
+  root+'framework/cloudinter/common/HttpRequest;': ['request('+root+'framework/cloudinter/common/HttpResponse;)V',
+      'handleResponse(Ljavax/net/ssl/HttpsURLConnection;'+root+'framework/cloudinter/common/HttpResponse;)V'],
+  root+'framework/cloudinter/CloudReqTask;': ['@signature(ILjava/lang/String;[B)V'],
   root+'ollie/transportlayer/feature/transportlayerselfcure/dataacceleration/QosAppInfo;': ['getSwitchState()I'],
   state: ['getDefaultDataSlotId()I','getQosPeriodStatus()I','isDataOn()Z','isWifiConnected()Z','isVpnModeSwitchOn()Z',
           'isDataRoaming(I)Z','getCellularIpv4Addr(I)Ljava/net/Inet4Address;',
@@ -61,7 +72,10 @@ fields = {
  qos: ['dbRequestInfo','isTaskExecuting'],
  timer:['punishTimerCache','sceneTime','isPunishDuration'],
  root+'ollie/intelligent/qos/QosTimer$TimerCache;':['error','startTime','duration'],
- root+'ollie/intelligent/qos/QosResponse;':['code','duration','msg','remoteMessage']
+ root+'ollie/intelligent/qos/QosResponse;':['code','duration','msg','remoteMessage'],
+ root+'framework/intf/CloudReqTaskExecutor;':['INTER_TIMES_CACHE_MAP'],
+ root+'framework/cloudinter/CloudReqTask;':['requestBody'],
+ root+'framework/cloudinter/common/HttpRequest;':['url','body','heads','auth']
 }
 report=[]
 for group, path in [('booster',a.booster),('system_base',a.system_base),('settings',a.settings)]:
@@ -77,7 +91,9 @@ for group, path in [('booster',a.booster),('system_base',a.system_base),('settin
     fs[c.get_name()]={f.get_name() for f in c.get_fields()}
    del dex
  for cls,methods in checks[group].items():
-  for method in methods:report.append({'class':cls,'method':method,'ok':method in found.get(cls,set())})
+  for method in methods:
+   matches = any(m.endswith(method[len('@signature'):]) for m in found.get(cls,set())) if method.startswith('@signature') else method in found.get(cls,set())
+   report.append({'class':cls,'method':method,'ok':matches})
  if group=='booster':
   for cls,names in fields.items():
    for field in names:report.append({'class':cls,'field':field,'ok':field in fs.get(cls,set())})
