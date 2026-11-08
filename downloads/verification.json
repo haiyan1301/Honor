@@ -1,0 +1,22 @@
+{
+  "package": "dev.codex.fastpass",
+  "version": "1.0.0",
+  "label": "优速通观察台",
+  "minSdk": "33",
+  "targetSdk": "36",
+  "permissions": [
+    "dev.codex.fastpass.permission.CONTROL"
+  ],
+  "meta": {
+    "xposedmodule": "true",
+    "xposedminversion": "82",
+    "xposeddescription": "荣耀优速通原生请求、单次本地检查绕过、云端原始返回与真实专用承载观察。适配系统服务 70.1.0.1。",
+    "xposedscope": "@7F010000"
+  },
+  "sha256": "20c3fafaf42ba3a121b2a61345db228fc4756852fe3d364a020fb91e86c6ccb3",
+  "bytes": 41501,
+  "signature_v3": true,
+  "domain_checks": 34,
+  "native_contract_checks": 58,
+  "device_tested": false
+}

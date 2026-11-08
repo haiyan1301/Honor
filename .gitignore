@@ -1,0 +1,14 @@
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+*.jks
+*.keystore
+*.pk8
+*.pem
+signing/
+__pycache__/
+*.pyc
+*.apk.idsig
+.DS_Store

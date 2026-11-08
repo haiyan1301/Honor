@@ -1,0 +1,2 @@
+20c3fafaf42ba3a121b2a61345db228fc4756852fe3d364a020fb91e86c6ccb3  HonorFastPassObserver-1.0.0.apk
+a3928aad782a242394060228ae1c6cb4514d566c07aac0775adf6b049cd3f683  HonorFastPassObserver-1.0.0-source.zip

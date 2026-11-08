@@ -1,0 +1,16 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'dev.codex.fastpass'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'dev.codex.fastpass'
+        minSdk 33
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    buildTypes { release { minifyEnabled false } }
+}
+dependencies { compileOnly 'de.robv.android.xposed:api:82' }
