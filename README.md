@@ -5,6 +5,7 @@
 - [下载 APK 1.1.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.1.0.apk)
 - [下载源码包 1.1.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.1.0-source.zip)
 - [请求参数、两类本地计数与 QCI 的反编译核对](docs/request-audit.md)
+- [详细交接文档：问题、过程、成果、证据与后续任务](docs/HANDOFF.zh-CN.md)
 - [SHA-256 校验值](downloads/SHA256SUMS.txt) / [验证记录](downloads/verification-1.1.0.json)
 
 升级后请在 LSPosed 额外勾选电话服务 `com.android.phone` 并重启。新增普通承载读取及 HTTP 审计尚需本机实测；1.0.0 安装包和源码包保留在 downloads 目录。
