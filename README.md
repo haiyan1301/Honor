@@ -1,102 +1,88 @@
-# 荣耀优速通观察台 1.1.0
+# 荣耀优速通观察台 1.2.0
 
 ## 下载
 
-- [下载 APK 1.1.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.1.0.apk)
-- [下载源码包 1.1.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.1.0-source.zip)
-- [请求参数、两类本地计数与 QCI 的反编译核对](docs/request-audit.md)
-- [详细交接文档：问题、过程、成果、证据与后续任务](docs/HANDOFF.zh-CN.md)
-- [SHA-256 校验值](downloads/SHA256SUMS.txt) / [验证记录](downloads/verification-1.1.0.json)
+- [下载 APK 1.2.0（原生自动模式）](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.2.0.apk)
+- [下载源码包 1.2.0](https://github.com/haiyan1301/Honor/raw/refs/heads/main/downloads/HonorFastPassObserver-1.2.0-source.zip)
+- [自动流程与 Hook 说明](docs/native-auto.md)
+- [SHA-256](downloads/SHA256SUMS.txt) / [验证记录](downloads/verification-1.2.0.json)
 
-升级后请在 LSPosed 额外勾选电话服务 `com.android.phone` 并重启。新增普通承载读取及 HTTP 审计尚需本机实测；1.0.0 安装包和源码包保留在 downloads 目录。
+本地验证：41 项判定、37 项原生自动策略/索引、31 项请求/无线证据测试通过，共 109 项；另有 121 项原生 DEX 接口核对及 12 项原生自动架构约束检查通过。与旧版签名一致。新自动链路尚未实机验证。
 
-本地验证：38 项判定测试、31 项请求/无线证据测试、76 项原生接口静态核对通过；与 1.0.0 签名一致。
+适配此次提供的系统服务 `com.hihonor.systemserver 70.1.0.1`、设置 `14.0.0.210`，用于 Magic7 Pro / Android 16 / MagicOS 10 的 LSPosed 模块。
 
-面向此次提供的 Magic7 Pro / Android 16 / MagicOS 10，以及系统服务 `com.hihonor.systemserver 70.1.0.1`、设置 `14.0.0.210` 制作的 LSPosed 模块。
+1.2.0 改为系统原生自动流程：系统识别场景、生成请求参数、持有回调、鉴权、申请、重试和管理承载。模块只放行已确认自动来源中的本地阻止条件，并观察真实结果。
 
 ## 安装与使用
 
-1. 安装 APK，打开一次“优速通观察台”。
-2. 在 LSPosed 启用模块，作用域勾选系统服务 `com.hihonor.systemserver`、设置 `com.android.settings`，以及电话服务 `com.android.phone`。从 1.0.0 升级也需要额外勾选电话服务并重启。
-3. 重启手机，再打开面板，点击“刷新系统状态”。
-4. 使用当前上网卡的 4G/5G 蜂窝网络；断开 WLAN、停用 VPN，并处于非漫游状态。
-5. 可先点击“读取本机 QCI / 5QI”，不发送加速申请、不消耗加速申请次数。
-6. 按需勾选“仅本次绕过 QoS 冷却与场景次数”，点击“发送一次加速请求”，等待最多约 120 秒观察结果。
-7. 可用“导出诊断文件”保存完整证据：最近 6 次请求快照、最多 300 条事件（另有总长度限制）、实际出站字段、请求前后两类计数、原始 HTTP/业务响应与各卡槽 QoS。
+1. 覆盖安装 APK，打开一次观察台。
+2. LSPosed 作用域勾选 `com.hihonor.systemserver`、`com.android.settings`、`com.android.phone`。
+3. 重启手机，确认面板显示模块后端 1.2.0 和原生版本 70.1.0.1。
+4. 打开“启用原生自动优速通条件放行”。该设置首次默认关闭；启用后持久保存，后端重启时读取。
+5. 使用符合原生要求的蜂窝网络，进入系统真实识别的游戏、直播、通勤、测速等场景，等待系统自动申请。没有真实场景时等待原生事件。
+6. 可独立点击“读取本机 QCI / 5QI”，不发送加速申请。
+7. 导出诊断，查看原生场景、QCI、请求参数、放行条件、云端结果和真实承载。
 
-系统设置的“移动网络”页会增加“荣耀优速通 · 观察台”入口；面板也提供打开原生优速通页面的按钮。
+开启/关闭只通知已有自动场景重新评估，不创建虚假场景。关闭放行后，后续判断恢复原生；已经发出的原生请求仍由系统处理。
 
-## 移动与电信
+## 参数与原生流程
 
-根据当前上网卡的真实卡槽和 PLMN 自动选择原生分支：
+模块不再构造 `DBRequestInfo`、指定 Manual、手工设置 QCI/时长/目的地址或直接调用申请接口。原生 `DataAccelerateScene.constructDBRequestInfo()` 构造参数，经原生 `toDBRequestInfo()` 转换后交给 QosManager。
 
-- 中国电信：保留原生 `QosConfig` 的 QCI 6 AppID，先通过运营商取令牌，再调用原生荣耀云端申请。
-- 中国移动：使用原生的直接荣耀云端申请分支，不套用电信令牌流程。
-- 其它 PLMN 仍遵循原生 QosManager 的分支规则；支持与否以服务端实际响应为准。
+Gaming 可按原生配置申请 QCI 3；其它自动场景按原生配置选择 QCI、时长和目的地址。电信取令牌、移动的另一原生分支、GRS 域名、请求头、签名、云端响应、原生回调及原生重试保持原流程。
 
-面板显示运营商、PLMN 和卡槽。双卡切换后刷新，再发起下一次请求；每条请求固定关联其发送时的卡槽。
+模块使用 Xposed 附加元数据关联来源，不向 JSON 添加自动标志，不把 Manual 改名成其它场景。原生手动场景 21 不接管、不放行；模块界面已移除手动发送和原生手动页面按钮。
 
-## 请求与本地绕过的范围
+## 放行哪些条件
 
-请求通过目标进程中的 `QosManager.requestDedicatedBearer(DBRequestInfo, Message)` 发送。模块从原生状态读取卡槽、PLMN、网络制式、蜂窝 IPv4/IPv6，构造 Manual / QCI 6 / 建议 30 分钟请求。令牌获取、云端通信和原生请求头都由荣耀服务处理。
+仅在模块已启用、目标版本匹配、自动场景来源确认时生效：
 
-本地绕过只在面板主动发起的这一次同步校验中生效，跳过 `QosTimer` 冷却和 `Base/Manual` 场景次数检查。原生完成逻辑仍会更新失败池、次数及冷却；诊断记录请求前后值。
+- 自动事件中的本地区域/服务期/总开关策略；保留真实产品支持和服务已启动要求。
+- 已存在完整原生配置的自动 QoS 场景启用判断。
+- 场景进入条件中的总开关、拥塞及本地惩罚等待位。
+- QosManager 的本地冷却和 Base/对应原生场景次数。
+- 公共业务 1004 的每日次数结果；仅配置已加载时放行，不改写原生计数。
 
-公共云请求执行器另有业务号 `1004` 的每日接口调用次数。该层及协议同意、并发、签名检查保留，并分别显示。未进入 HTTP 的本地拒绝不会标成云端拒绝。详见 [请求与计数反编译核对](docs/request-audit.md)。
+网络连接、真实场景/前台优先级、漫游、VPN、制式、运营商、双卡切换保护、已有 VIP/重复承载、参数有效性、并发、协议同意、令牌和签名保持原生。尚未满足的进入条件记录在 `remainingBlockedBits`。
 
-有效参数、服务已启动、并发任务和同类 IP/QCI 重复请求检查保留。模块不修改设备标识、令牌、场景或签名来伪造云端权益。
+[自动流程与 Hook 详细说明](docs/native-auto.md)
 
-本地服务期或场景触发逻辑没有参与本面板直接调用路径。模块仍要求有效的蜂窝数据、原生 IPv4 和 4G/5G 条件。不会自动循环发送请求。
+## 观察与真实 QCI
 
-只有后端版本为 `70.1.0.1` 且关键接口 Hook 就绪时才允许发起请求；版本不匹配时保留观察并显示原因。
+- 继续独立读取电话进程的 RIL 数据连接默认 QoS 和 QoS 会话，分别显示 LTE QCI 与 NR 5QI。
+- 继续观察荣耀电话框架消息 105 / Booster 回调 2001 的专用承载。
+- 按该次原生请求的实际 QCI、卡槽、时间与可靠基线判断，不固定使用 QCI 6。
+- 云端业务 200 与正确卡槽的新活跃匹配承载共同作为证据；原生结果 1 不单独算成功。
+- 无 QoS 字段/无回报时显示未知；云端拒绝保持原样。
 
-## 判定与原始证据
+新增自动来源读取和 Hook 需要实机验证。RIL 可能不提供默认 QoS；未知不会被填成 6 或 9。此模块不会保证云端允许服务或固定幅度提速。
 
-“本机各卡槽真实 QoS”独立于申请结果。从电话进程通过 `CommandsInterface.getDataCallList(Message)` 主动只读查询，并监听数据连接变化。每条数据连接分别展示 `DataCallResponse.getDefaultQos()` 和 `getQosBearerSessions()` 的实际字段：LTE 为 QCI，NR 为 5QI；两者不相互冒充。当前系统默认蜂窝接口能匹配时单独标记，其它数据连接可能包含 IMS 等业务。
+## 日志及原生记账
 
-RIL 或供应商实现可以不返回 QoS 对象。空值、字段缺失、接口异常或无连接时均显示未知，不假设 QCI=9，也不把申请参数 QCI=6 作为实际值。该标准路径已核对 Android 16 AOSP 接口；尚未取得本机电话框架 APK/JAR 或对新路径进行实机验证。荣耀专用消息 `105/2001` 继续作为独立证据展示。
+记录原生 uid/sceneId/userSceneId、真实 scene/cause/QCI/时长、参数来源、实际脱敏 HTTP body/headers、两层计数原始与有效检查结果、请求前后记账、HTTP/业务返回和承载。
 
-“已确认承载激活”需要同时满足：
+每次 native 请求按对象身份索引，较早请求的回调可在较新尝试出现后继续归档；不会替换原生 Message 或回调。最多索引 24 次请求，导出最多 6 次请求快照和 300 条事件，并保留体积限制。
 
-1. 本次原始云端业务响应码确实为 `200`。
-2. 电话框架 `105` 消息经 Booster `2001` 回调返回了请求卡槽的专用承载列表。
-3. 请求之后的新回报中存在 `bearerType=2 && qci=6 && bearerState=1`。
-4. 请求前 5 秒内观察到的真实回报证明没有匹配活跃承载，或本次先收到新的无匹配活跃承载回报、随后再收到激活回报。仅有无时间戳的空缓存不能证明基线可靠。
+原生失败仍可能更新计数及冷却。公共次数在超限路径原本不再增加，放行该结果不会自动补写或伪造原生计数；日志明确记录。CHR 与云端自己的权益/频控仍是独立路径。
 
-请求前已存在匹配承载，或缺少可靠基线时，只显示“承载活跃，归因未确认”。观察超时后的回报仍显示在实时列表中，不重新打开已结束的请求。
+## 构建与验证
 
-原生完成回调的本地结果 `1` 仅供参考。原生把网络无响应 `104` 映射为成功的情况不会变成本模块的云端成功。仅显示“正在加速”的原生失败展示分支也不参与本模块判定。
-
-请求前缓存、其它卡槽的回报、类型 1 的 VIP QCI 6、未激活状态和无法确认的云端响应都不会当成本次成功。没有承载条目时显示真实 QCI 未知，不填入猜测值。
-
-“停止本次观察”停止面板对该请求的观察；已发出的网络申请仍由原生服务处理。模块在系统存在其它活跃专用承载时保留监测，避免干扰原生服务。
-
-该判定确认的是与荣耀原生规则一致的专用承载激活证据，实际吞吐和时延改善需测量。云端是否允许服务、是否仍返回 202 等由服务端决定。202 在原生常量中定义为超出服务有效期；缺少服务端说明时，无法进一步确定是哪项权益或策略。
-
-请求审计来自实际原生 HTTP 对象，按 applyId 对应本次请求，记录脱敏 body/headers、候选计数字段名、设备发送时间、签名时间戳、默认网络和卡槽。收到原生 HTTP 回调时，保留反序列化前的 JSON 字段；HTTP 非 200 的原生未使用错误流也尝试限量读取。返回 duration=0 会如实显示 0，不沿用建议 30 分钟冒充返回时长。
-
-## 诊断与权限
-
-- APK 本身不申请互联网或存储访问权限；网络申请在已授权的荣耀原生系统服务内执行。
-- 控制广播要求模块自定义的签名权限。诊断 Provider 的系统桥接只允许模块自身、平台 UID 1000 和 root UID；电话 UID 1001 仅可写入 `radio` 命名空间。只有模块自身能够排入加速操作命令。
-- 电信成功令牌不读入面板、不写入诊断文件。云端详情仅保留业务码、duration、msg、remoteMessage 和传输状态，并对常见凭证字段脱敏。
-- 未直接使用 `su`、未修改系统 APK，也不依赖终端挂载视图，因此适用于此次 KernelSU 环境。
-
-## 构建
-
-可用 Android Studio / Gradle 构建 `app`（compileSdk 36，AGP 8.10.1，JDK 17+）。Xposed API 82 是 compileOnly 依赖。
-
-也可使用随附 `build.py`，配合 Android SDK platform 36、build-tools 36.0.0、Xposed API 82 JAR 和 PKCS#8 签名私钥/X.509 证书构建。该脚本不下载工具，不访问用户云端服务。
+使用 Android Studio/Gradle，或 `build.py` 配合 SDK platform 36、build-tools 36.0.0、Xposed API 82、签名材料构建。传入 `--json-test-jar` 可执行 JVM JSON/无线证据测试；测试 JAR 不打入 APK。
 
 ```sh
-python3 build.py --android-jar /path/to/android.jar \
-  --build-tools /path/to/build-tools/36.0.0 \
-  --xposed-api /path/to/api-82.jar \
-  --key /path/to/key.pk8 --cert /path/to/cert.pem
+python3 build.py --android-jar /SDK/platforms/android-36/android.jar \
+  --build-tools /SDK/build-tools/36.0.0 --xposed-api /deps/api-82.jar \
+  --json-test-jar /deps/json-20240303.jar \
+  --key /private/key.pk8 --cert /private/cert.pem
+python3 check_native_auto.py --out native-auto-architecture.json
 ```
 
-构建过程执行 `tests/OutcomePolicyTest.java`。额外传入 `--json-test-jar /path/to/json-20240303.jar` 可执行 `tests/AuditRadioTest.java`，验证 LTE/NR 区分、缺失 QoS、默认与专用会话的区分、真实参数与其它请求隔离、计数字段发现及凭证脱敏。该测试 JAR 不打进 APK。
+`check_contract.py` 核对上传原始 DEX 的方法和字段。静态检查和本地测试不能代替实机运营商验证。
 
-## 验证范围
+## 历史资料
 
-本环境完成编译、判定/参数/无线证据测试、APK 签名验证和对上传 DEX 的接口静态核对。1.0.0 的实机诊断已确认系统服务注入、本地 QoS 绕过、电信取令牌和云端业务拒绝链路；1.1.0 的新增电话进程及 HTTP 审计观察点仍需实机验证。本环境没有连接用户手机。首次升级请导出诊断文件核对。
+- [1.2.0 原生自动流程说明](docs/native-auto.md)
+- [1.1.0 详细历史交接](docs/HANDOFF.zh-CN.md)
+- [申请参数、计数与 QCI 反编译说明](docs/request-audit.md)
+
+旧版与 1.2.0 使用同一签名，可覆盖升级；每次升级应重启目标进程。已发布旧 APK/源码归档保留原文件和校验值。

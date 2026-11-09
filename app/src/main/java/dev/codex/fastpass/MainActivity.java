@@ -40,8 +40,9 @@ public final class MainActivity extends Activity {
         }
     };
     private TextView connection, verdict, explanation, local, cloud, bearer, raw, events, latestError, radio, audit;
-    private Button request;
-    private CheckBox bypass;
+    private CheckBox autoSwitch;
+    private TextView autoState;
+    private boolean renderingAuto;
     private JSONObject lastState = new JSONObject();
     private JSONArray lastEvents = new JSONArray();
     private JSONArray requestHistory = new JSONArray();
@@ -66,7 +67,7 @@ public final class MainActivity extends Activity {
         scroll.addView(column); root.addView(scroll, new LinearLayout.LayoutParams(-1, -1)); setContentView(root);
         TextView eyebrow = text("HONOR FAST PASS  /  OBSERVER", 11, MINT); eyebrow.setLetterSpacing(.12f); column.addView(eyebrow);
         TextView title = text("优速通观察台", 29, TEXT); title.setTypeface(null, Typeface.BOLD); margin(column, title, 8, 4);
-        TextView subtitle = text("一次真实申请，逐层查看结果", 14, MUTED); margin(column, subtitle, 0, 18);
+        TextView subtitle = text("系统原生自动流程 · 本机 QoS 与云端证据", 14, MUTED); margin(column, subtitle, 0, 18);
 
         LinearLayout status = card(column, "系统连接");
         connection = body(status, 14);
@@ -82,19 +83,15 @@ public final class MainActivity extends Activity {
         verdict = text("等待开始", 24, MUTED); verdict.setTypeface(null, Typeface.BOLD); result.addView(verdict);
         explanation = body(result, 14);
 
-        LinearLayout actions = card(column, "原生申请");
+        LinearLayout actions = card(column, "系统原生自动优速通");
         TextView description = body(actions, 14);
-        description.setText("使用当前上网卡申请 QCI 6 专用承载，建议时长 30 分钟。请使用 4G/5G 蜂窝网络，断开 WLAN、停用 VPN，并处于非漫游状态。");
-        bypass = new CheckBox(this); bypass.setText("仅本次绕过 QoS 冷却与场景次数"); bypass.setTextColor(TEXT); bypass.setTextSize(14);
-        bypass.setButtonTintList(android.content.res.ColorStateList.valueOf(MINT)); bypass.setChecked(getPreferences(0).getBoolean("bypass", true));
-        bypass.setOnCheckedChangeListener((b, checked) -> getPreferences(0).edit().putBoolean("bypass", checked).apply()); actions.addView(bypass);
-        request = button("发送一次加速请求", true); actions.addView(request); request.setOnClickListener(v -> command("request", true));
-        Button stop = button("停止本次观察", false); actions.addView(stop); stop.setOnClickListener(v -> command("stop", true));
-        Button nativePage = button("打开原生荣耀优速通页面", false); actions.addView(nativePage);
-        nativePage.setOnClickListener(v -> {
-            try { startActivity(new Intent("android.settings.EXPRESS_APP_SETTINGS").setPackage(Protocol.SETTINGS)); }
-            catch (Throwable t) { toast("未找到原生页面：" + t.getClass().getSimpleName()); }
-        });
+        description.setText("由系统真实识别游戏、直播、通勤、测速等场景，并自行创建参数、鉴权、申请和重试。模块仅放行本地策略、冷却和次数条件；网络、参数、并发、重复、协议和签名检查保持原生。");
+        autoSwitch = new CheckBox(this); autoSwitch.setText("启用原生自动优速通条件放行");
+        autoSwitch.setTextColor(TEXT); autoSwitch.setTextSize(14);
+        autoSwitch.setButtonTintList(android.content.res.ColorStateList.valueOf(MINT));
+        actions.addView(autoSwitch);
+        autoSwitch.setOnCheckedChangeListener((b, checked) -> { if (!renderingAuto) command("setAuto", true); });
+        autoState = body(actions, 13);
 
         local = body(card(column, "本机条件与原生计数"), 14);
         cloud = body(card(column, "运营商处理与云端返回"), 14);
@@ -112,9 +109,9 @@ public final class MainActivity extends Activity {
             toast("已复制");
         });
         TextView help = body(diagnostics, 13);
-        help.setText("在 LSPosed 启用本模块，作用域勾选「系统服务」com.hihonor.systemserver、「设置」com.android.settings，以及「电话服务」com.android.phone，然后重启手机。\n\n本机 QoS 通过电话进程只读查询 RIL 数据连接列表。框架没有返回的 QCI/5QI 保留未知；每个数据连接可能有自己的默认 QoS 和多个会话。\n\n申请仅绕过 QoS 冷却和场景次数；公共云接口每日次数、协议同意、并发和签名检查仍沿用原生逻辑。诊断记录真实发送层参数及两类本地计数。\n\n版本 " + Protocol.VERSION + " · 系统服务 70.1.0.1 / Android 16");
+        help.setText("在 LSPosed 启用本模块，作用域为 com.hihonor.systemserver、com.android.settings、com.android.phone，然后重启。\n\n本版使用真实系统自动场景构造参数。Gaming 可由原生配置申请 QCI 3，其它场景按原生配置选择 QCI/时长/目的地址。未提供自动场景时等待系统事件。\n\n开启条件放行会作用于已确认来源的原生自动请求。公共次数只有配置已加载时才可放行；协议同意、真实网络、并发和签名保持原生。\n\n版本 " + Protocol.VERSION + " · 适配系统服务 70.1.0.1");
         connection.setText("等待系统服务响应，请确认 LSPosed 作用域并重启。");
-        explanation.setText("云端业务码 200 + 本次请求后对应卡槽的活跃专用承载回报，才判定为已确认成功。");
+        explanation.setText("云端业务码 200 与正确卡槽的新匹配承载共同判断；前态不可靠时保留归因未知。");
     }
     @Override protected void onResume() {
         super.onResume(); handler.post(poll); handler.postDelayed(() -> command("refresh", false), 350L);
@@ -125,10 +122,10 @@ public final class MainActivity extends Activity {
     }
     private void command(String type, boolean showError) {
         try {
-            Bundle args = new Bundle(); args.putBoolean("bypass", bypass.isChecked());
+            Bundle args = new Bundle(); args.putBoolean("enabled", autoSwitch.isChecked());
             Bundle result = getContentResolver().call(Protocol.BRIDGE, "enqueue", type, args);
             if (result == null || result.containsKey("error")) throw new IllegalStateException(result == null ? "本机控制桥未返回" : result.getString("error"));
-            if ("request".equals(type)) { pendingId = result.getString("id", ""); pendingAt = System.currentTimeMillis(); }
+            if ("setAuto".equals(type)) { pendingId = result.getString("id", ""); pendingAt = System.currentTimeMillis(); }
             Intent i = new Intent(Protocol.ACTION).setPackage(Protocol.TARGET);
             i.addFlags(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_RECEIVER_REGISTERED_ONLY);
             sendBroadcast(i);
@@ -163,29 +160,34 @@ public final class MainActivity extends Activity {
             + "\n最近响应：" + time(seen));
         connection.setTextColor(ready && mismatch.isEmpty() ? MINT : AMBER);
         String commandError = value(s, "lastCommandError");
-        if (!pendingId.isEmpty() && pendingId.equals(s.optString("sessionId"))) pendingId = "";
+        if (!pendingId.isEmpty() && pendingId.equals(s.optString("lastCommandId"))) pendingId = "";
         if (!pendingId.isEmpty() && System.currentTimeMillis() - pendingAt > 30000L) {
-            commandError = "请求未在 30 秒内由后端接收，请检查作用域和系统服务连接"; pendingId = "";
+            commandError = "自动模式设置未在 30 秒内确认，请检查作用域和系统服务连接"; pendingId = "";
         }
         if (!commandError.isEmpty() && s.optLong("lastCommandAt", 0) >= pendingAt) pendingId = "";
         String errors = mismatch;
         if (!commandError.isEmpty()) errors += (errors.isEmpty() ? "" : "\n") + commandError;
         if (!value(s, "refreshError").isEmpty()) errors += (errors.isEmpty() ? "" : "\n") + value(s, "refreshError");
         latestError.setText(errors); latestError.setVisibility(errors.isEmpty() ? View.GONE : View.VISIBLE);
-        request.setEnabled(ready && mismatch.isEmpty() && pendingId.isEmpty() && !s.optBoolean("sessionOpen", false));
+        autoSwitch.setEnabled(ready && mismatch.isEmpty() && pendingId.isEmpty());
+        if (pendingId.isEmpty()) { renderingAuto = true; autoSwitch.setChecked(s.optBoolean("autoEnabled", false)); renderingAuto = false; }
+        autoState.setText((pendingId.isEmpty() ? s.optBoolean("autoEnabled") ? "条件放行已开启；系统出现真实自动场景时自行申请。" : "条件放行已关闭；系统沿用自己的原生判断。" : "正在等待后端应用自动模式设置…")
+            + "\n关闭放行后，已经发出的原生申请仍由系统处理。"
+            + "\n最近原生场景：" + s.optJSONObject("lastNativeAutoEvent")
+            + "\n原生自动管理器：" + s.optJSONObject("nativeAutoManager"));
 
         String code = s.optString("verdict", "IDLE");
         String headline, detail;
         int color = AMBER;
         switch (code) {
             case "CONFIRMED": headline = "已确认承载激活"; color = MINT;
-                detail = "本次云端原始业务码为 200，且对应卡槽在请求之后回报了类型 2、QCI 6、状态 1 的专用承载。"; break;
+                detail = "本次原生自动申请的业务码为 200，且对应卡槽新回报了类型 2、匹配请求 QCI、状态 1 的专用承载。"; break;
             case "ACTIVE_PREEXISTING": headline = "承载活跃，归因未确认";
                 detail = "云端返回 200，已收到活跃承载回报；但请求前已有匹配承载，或无法可靠读取请求前状态，不能把效果归因于本次申请。"; break;
             case "LOCAL_REJECTED": headline = "本地校验拒绝：" + number(s, "localCode"); color = RED;
                 detail = localMeaning(s.optInt("localCode", 0)); break;
             case "COMMON_LOCAL_REJECTED": headline = "公共接口本地拦截：" + number(s, "commonLocalCode"); color = RED;
-                detail = s.optInt("commonLocalCode") == 101 ? "业务 1004 的本地每日调用上限已触发，本次没有进入 HTTP 发送。"
+                detail = s.optInt("commonLocalCode") == 101 ? "业务 1004 的本地次数或配置检查未通过，本次没有进入 HTTP；查看是否缺少配置或未应用放行。"
                     : s.optInt("commonLocalCode") == 102 ? "原生公共接口的协议同意检查未通过，本次没有发给云端。"
                     : "原生公共接口正在处理同业务请求，本次未重复提交。"; break;
             case "TELECOM_FAILED": headline = "电信鉴权失败"; color = RED;
@@ -202,13 +204,9 @@ public final class MainActivity extends Activity {
             case "ENDED": headline = "本次观察已结束"; color = MUTED;
                 detail = "保留已获取的原始证据；当前承载状态可通过刷新或新的底层回报查看。"; break;
             case "ERROR": headline = "请求处理异常"; color = RED; detail = value(s, "error"); break;
-            case "PREPARING": headline = "正在准备原生请求"; detail = "读取当前上网卡与蜂窝地址，构造原生 QCI 6 请求。"; break;
+            case "PREPARING": headline = "正在观察原生自动请求"; detail = "系统正在处理自己的自动场景请求，模块只观察原生参数。"; break;
             case "WAITING": headline = "等待云端 / 承载回报"; detail = "申请已经过本地检查，等待原始云端结果与底层承载证据。"; break;
-            default: headline = "等待开始"; color = MUTED; detail = "开启模块并刷新连接后，可发送一次真实申请。";
-        }
-        if (!pendingId.isEmpty()) { headline = "等待系统接收本次命令"; detail = "当前尚未把旧请求结果作为这次请求的结果。"; color = AMBER; }
-        else if (!commandError.isEmpty() && s.optLong("lastCommandAt", 0) >= s.optLong("startedAt", 0)) {
-            headline = "本次操作未发送"; detail = commandError; color = RED;
+            default: headline = "等待系统自动场景"; color = MUTED; detail = "启用条件放行后，打开系统能识别的游戏、直播或测速等场景，申请由原生系统自行触发。";
         }
         verdict.setText(headline); verdict.setTextColor(color);
         explanation.setText(detail + (s.optLong("startedAt", 0) > 0 ? "\n请求时间：" + time(s.optLong("startedAt")) : ""));
@@ -223,11 +221,12 @@ public final class MainActivity extends Activity {
             + "\n本地服务期状态：" + number(s, "qosPeriod")
             + "\n冷却状态：" + yes(s, "cooldownActive") + " / 错误码 " + number(s, "cooldownCode")
             + "\n冷却记录起点：" + value(s, "cooldownStart") + " / " + number(s, "cooldownMinutes") + " 分钟"
-            + "\n当前基础剩余：" + number(s, "baseRemaining") + "   手动剩余：" + number(s, "manualRemaining")
+            + "\n当前基础剩余：" + number(s, "baseRemaining")
+            + "\n各原生自动场景次数：" + s.optJSONObject("autoSceneQuotas")
             + "\n失败池剩余：" + number(s, "failRemaining")
             + "\n本次校验码：" + number(s, "localCode") + "   申请绕过：" + yes(s, "bypass")
             + "\n实际应用 QoS 单次绕过：" + yes(s, "qosBypassApplied"));
-        cloud.setText("运营商：" + value(s, "operator") + "   PLMN：" + value(s, "plmn")
+        cloud.setText("原生场景：" + value(s, "nativeScene") + "   原因：" + value(s, "nativeCause") + "\n运营商：" + value(s, "operator") + "   PLMN：" + value(s, "plmn")
             + "\n申请卡槽：" + sim(s.optInt("requestSlot", -1))
             + "\n运营商分支：" + value(s, "telecom")
             + "\n电信 HTTP：" + number(s, "telecomHttp")
@@ -237,7 +236,7 @@ public final class MainActivity extends Activity {
             + "\nmsg：" + value(s, "cloudMessage") + "\nremoteMessage：" + value(s, "remoteMessage")
             + "\n网络传输结果：" + value(s, "cloudTransport")
             + "\n原生完成映射：" + number(s, "nativeResult") + "（仅供参考）"
-            + "\n请求时长：30 分钟 / 返回时长：" + number(s, "returnedMinutes") + " 分钟");
+            + "\n原生请求时长：" + number(s, "requestedMinutes") + " 分钟 / 返回时长：" + number(s, "returnedMinutes") + " 分钟");
         JSONArray list = s.optJSONArray("observedBearers");
         String source = "真实电话回报";
         long reportAt = s.optLong("observedAt", 0);
@@ -256,21 +255,21 @@ public final class MainActivity extends Activity {
             bs.append("\n\n承载 ").append(i + 1).append("   QCI = ").append(item.optInt("qci", -1))
                 .append("\n类型 = ").append(item.optInt("type", -1)).append("   状态 = ").append(item.optInt("state", -1));
         }
-        bs.append("\n\n判定目标：类型 2 / QCI 6 / 状态 1")
+        bs.append("\n\n判定目标：类型 2 / QCI " + number(s, "requestedQci") + " / 状态 1")
             .append("\n本次收到新回报：").append(yes(s, "bearerFresh"))
             .append("\n本次匹配承载活跃：").append(yes(s, "bearerActive"));
         bearer.setText(bs.toString());
         renderRadio(s);
         JSONObject actual = s.optJSONObject("requestAudit");
         JSONObject auditView = new JSONObject().put("actualHttpRequest", actual == null ? new JSONObject() : actual)
-            .put("preflight", s.optJSONObject("preflight"))
+            .put("preflight", s.optJSONObject("preflight")).put("nativeOrigin", s.optJSONObject("nativeOrigin")).put("autoGates", s.optJSONArray("autoGates"))
             .put("qosQuotaBefore", s.optJSONObject("quotaBefore")).put("qosQuotaAfter", s.optJSONObject("quotaAfter"))
             .put("commonCloudChecks", s.optJSONObject("commonCloudChecks"))
             .put("commonCloudBudgetNow", s.optJSONObject("commonCloudBudget"));
         audit.setText((actual != null && actual.optBoolean("captured") ? "已捕获本次实际 HTTP 对象（令牌、设备标识和 IP 已脱敏）"
             : "尚未到实际 HTTP 发送层；不能用构造参数冒充已发送参数")
             + "\n\n" + auditView.toString(2)
-            + "\n\n通用调用次数另有 CHR 统计落库，云端是否使用统计无法由客户端证明。云端也可独立按设备、令牌、IP 等校验权益和频次。");
+            + "\n\n本地次数放行不重置原生计数；诊断分别记录原始与放行结果。CHR 统计和云端自己的权益/频次判断仍可能影响结果。");
         String rawValue = value(s, "cloudRaw");
         raw.setText(new JSONObject().put("httpEvidence", s.optJSONObject("httpResponse"))
             .put("nativeParsedResponse", rawValue.isEmpty() ? JSONObject.NULL : new JSONObject(rawValue)).toString(2));

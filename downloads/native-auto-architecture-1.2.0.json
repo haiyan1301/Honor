@@ -1,0 +1,50 @@
+[
+  {
+    "check": "no reflective request construction",
+    "ok": true
+  },
+  {
+    "check": "no direct native submit from module",
+    "ok": true
+  },
+  {
+    "check": "no request setters",
+    "ok": true
+  },
+  {
+    "check": "no native field mutation",
+    "ok": true
+  },
+  {
+    "check": "no replacement arguments",
+    "ok": true
+  },
+  {
+    "check": "no replacement cloud result",
+    "ok": true
+  },
+  {
+    "check": "no manual request command in UI",
+    "ok": true
+  },
+  {
+    "check": "bridge accepts only mode/refresh controls",
+    "ok": true
+  },
+  {
+    "check": "no module bearer monitoring start/stop",
+    "ok": true
+  },
+  {
+    "check": "no independent HTTP client",
+    "ok": true
+  },
+  {
+    "check": "native provenance captured",
+    "ok": true
+  },
+  {
+    "check": "native callback retained",
+    "ok": true
+  }
+]

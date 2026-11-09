@@ -32,19 +32,22 @@ public final class BridgeProvider extends ContentProvider {
         } else trusted("enqueue".equals(method) || "clearLog".equals(method));
         Bundle result = new Bundle();
         try {
-            if ("snapshot".equals(method)) {
+            if ("controls".equals(method)) {
+                result.putBoolean("autoEnabled", prefs.getBoolean("autoEnabled", false));
+            } else if ("snapshot".equals(method)) {
                 result.putString("state", prefs.getString("state", "{}"));
                 result.putString("events", prefs.getString("events", "[]"));
                 result.putString("history", prefs.getString("history", "[]"));
-            } else if ("publish".equals(method) || radioPublisher) {
+            } else if ("publish".equals(method) || "archive".equals(method) || radioPublisher) {
                 if (!radioPublisher && Binder.getCallingUid() != 1000 && Binder.getCallingUid() != 0) throw new SecurityException("System publisher only");
                 JSONObject base = state();
                 JSONObject patch = new JSONObject(extras == null ? "{}" : extras.getString("patch", "{}"));
+                boolean archiveOnly = "archive".equals(method);
                 java.util.Iterator<String> it = patch.keys();
                 while (it.hasNext()) {
                     String k = it.next();
                     if (radioPublisher && !k.startsWith("radio")) throw new SecurityException("Radio namespace only");
-                    base.put(k, patch.get(k));
+                    if (!archiveOnly) base.put(k, patch.get(k));
                 }
                 base.put("updatedAt", System.currentTimeMillis());
                 SharedPreferences.Editor edit = prefs.edit().putString("state", base.toString());
@@ -55,6 +58,10 @@ public final class BridgeProvider extends ContentProvider {
                         if (old != null && !patch.optString("sessionId").equals(old.optString("sessionId"))) history.put(old);
                     }
                     history.put(patch);
+                    java.util.List<JSONObject> ordered = new java.util.ArrayList<>();
+                    for (int i = 0; i < history.length(); i++) ordered.add(history.getJSONObject(i));
+                    ordered.sort((a, b) -> Long.compare(a.optLong("startedAt"), b.optLong("startedAt")));
+                    history = new JSONArray(); for (JSONObject row : ordered) history.put(row);
                     JSONArray recent = new JSONArray();
                     int start = history.length(), characters = 0;
                     while (start > 0 && history.length() - start < 6) {
@@ -85,19 +92,22 @@ public final class BridgeProvider extends ContentProvider {
                 edit.apply();
                 result.putBoolean("ok", true);
             } else if ("enqueue".equals(method)) {
-                if (!"request".equals(arg) && !"refresh".equals(arg) && !"stop".equals(arg)) throw new IllegalArgumentException("Unknown command");
+                if (!"setAuto".equals(arg) && !"refresh".equals(arg)) throw new IllegalArgumentException("Only native-auto control and refresh are supported");
                 String pending = prefs.getString("command", "");
-                if (!pending.isEmpty() && !"stop".equals(arg)) {
+                if (!pending.isEmpty() && "refresh".equals(arg)) {
                     JSONObject old = new JSONObject(pending);
-                    if ("request".equals(old.optString("type")) && System.currentTimeMillis() - old.optLong("createdAt") < 30000L)
-                        throw new IllegalStateException("已有待处理的请求，请等待系统接收");
+                    if ("setAuto".equals(old.optString("type")) && System.currentTimeMillis() - old.optLong("createdAt") < 30000L)
+                        throw new IllegalStateException("自动模式设置尚待后端接收");
                 }
                 JSONObject c = new JSONObject();
                 c.put("type", arg);
                 c.put("id", java.util.UUID.randomUUID().toString());
                 c.put("createdAt", System.currentTimeMillis());
-                c.put("bypass", extras != null && extras.getBoolean("bypass", true));
-                prefs.edit().putString("command", c.toString()).apply();
+                boolean on = extras != null && extras.getBoolean("enabled", false);
+                c.put("enabled", on);
+                SharedPreferences.Editor edit = prefs.edit().putString("command", c.toString());
+                if ("setAuto".equals(arg)) edit.putBoolean("autoEnabled", on);
+                edit.apply();
                 result.putString("id", c.getString("id"));
             } else if ("take".equals(method)) {
                 if (Binder.getCallingUid() != 1000 && Binder.getCallingUid() != 0) throw new SecurityException("System consumer only");

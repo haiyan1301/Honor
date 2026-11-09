@@ -16,7 +16,7 @@ p.add_argument('--xposed-api', type=Path, required=True)
 p.add_argument('--key', type=Path, required=True)
 p.add_argument('--cert', type=Path, required=True)
 p.add_argument('--json-test-jar', type=Path, help='Optional org.json JVM runtime for wire/radio evidence tests')
-p.add_argument('--out', type=Path, default=ROOT/'build'/'HonorFastPassObserver-1.1.0.apk')
+p.add_argument('--out', type=Path, default=ROOT/'build'/'HonorFastPassObserver-1.2.0.apk')
 a = p.parse_args()
 work = ROOT/'build'
 for sub in ['classes', 'dex', 'tests']:
@@ -38,6 +38,10 @@ run(*javac, '-encoding', 'UTF-8', '-d', work/'tests',
     ROOT/'app/src/main/java/dev/codex/fastpass/OutcomePolicy.java',
     ROOT/'app/src/main/java/dev/codex/fastpass/OperatorRoute.java', ROOT/'tests/OutcomePolicyTest.java')
 run('java', '-cp', work/'tests', 'dev.codex.fastpass.OutcomePolicyTest')
+run(*javac, '-encoding', 'UTF-8', '-d', work/'tests',
+    ROOT/'app/src/main/java/dev/codex/fastpass/AutoPolicy.java',
+    ROOT/'app/src/main/java/dev/codex/fastpass/AutoRequestIndex.java', ROOT/'tests/AutoModeTest.java')
+run('java', '-cp', work/'tests', 'dev.codex.fastpass.AutoModeTest')
 if a.json_test_jar:
     run(*javac, '-encoding', 'UTF-8', '-classpath', a.json_test_jar.resolve(), '-d', work/'tests',
         ROOT/'app/src/main/java/dev/codex/fastpass/WireAudit.java',

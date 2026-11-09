@@ -26,13 +26,26 @@ timer = root+'ollie/intelligent/qos/QosTimer;'
 state = root+'framework/intf/OllieStateManager;'
 utils = root+'framework/utils/BoosterUtils;'
 link = root+'ollie/transportlayer/framework/intf/link/LinkLayerProxy;'
+auto = root+'ollie/transportlayer/feature/transportlayerselfcure/dataacceleration/'
+trans = root+'ollie/transportlayer/framework/intf/CommsCloud/DBRequestInfoForTrans;'
 checks = {
  'booster': {
   qos: ['getInstance()'+qos, 'requestDedicatedBearer('+req+'Landroid/os/Message;)V',
         'checkIfQosReqLegal('+req+')I', 'doWhenQosSuccess('+root+'framework/cloudinter/common/CloudTaskResult;)V',
         'handleTelecomReturn(Landroid/os/AsyncResult;)V', 'isDBWorking(I)Z', 'isQosEnabled()Z'],
   req: ['<init>(Ljava/lang/String;II'+scene+cause+'Ljava/lang/String;Ljava/util/List;I)V',
-        'setIpv6(Ljava/lang/String;)'+req, 'getApplyId()Ljava/lang/String;', 'checkParamIllegal()Z'],
+        'setIpv6(Ljava/lang/String;)'+req, 'getApplyId()Ljava/lang/String;', 'checkParamIllegal()Z',
+        'getScene()Ljava/lang/String;', 'getQosCause()Ljava/lang/String;', 'getPlmn()Ljava/lang/String;', 'getRat()I', 'getQciType()I', 'getDuration()I'],
+  auto+'DataAccelerateManager;': ['getInstance()'+auto+'DataAccelerateManager;', 'isQosRequestNeeded()Z', 'isQosFeatureEnabled()Z',
+      'isSceneEnabled(I)Z', 'triggerDataAccelerateSceneInstance(III)V', 'handleUserSceneEnter(II'+root+'ollie/transportlayer/framework/intf/featureproxy/userscene/NetInfo;)V',
+      'handleBearerSceneChange(III)V','triggerQosSceneInstance(ZI)V', 'onOldProtocolHighSpeedRailChanged(Z)V',
+      'onOldProtocolMetroChanged(Z)V', 'onOldProtocolLiveChanged(I)V', 'onOldProtocolCommuteChanged(Z)V'],
+  auto+'DataAccelerateScene;': ['getQosReqScene()'+root+'ollie/transportlayer/framework/utils/TransportLayerConsts$Scene;',
+      'startQosReq()V','connectQosCloudService()V','constructDBRequestInfo()'+trans, 'isSatisfyEnterCondition()Z',
+      'isNonLagPenaltyDuration()Z','handleDbCloudDone(Landroid/os/Message;)V'],
+  auto+'DataAccelerateScene$PrepareAccState;': ['processMessage(Landroid/os/Message;)Z'],
+  auto+'DataAccelerateScene$AsyncExecState;': ['enter()V','processMessage(Landroid/os/Message;)Z'],
+  trans: ['toDBRequestInfo()'+req],
   timer: ['getInstance()'+timer, 'hasExistIp('+req+')Z'],
   root+'ollie/common/OllieFeature;': ['isStart()Z'],
   root+'ollie/intelligent/qos/QosConfig;': ['getTokenAppid()Ljava/util/Map;'],
@@ -69,7 +82,10 @@ checks = {
  }
 }
 fields = {
- qos: ['dbRequestInfo','isTaskExecuting'],
+ qos: ['dbRequestInfo','isTaskExecuting','qosMessage'],
+ auto+'DataAccelerateManager;':['dataAccSceneConfigHashMap','dataAccSceneMap','handler'],
+ auto+'DataAccelerateScene;':['dataAccSceneConfig','uid','userSceneId','enterCondition','ollieStateManager'],
+ auto+'DataAccSceneConfig;':['sceneId','accAction','qciType','isSupportAsyncExec','dedicatedBearerReqDuration','sceneEnable','accEnter'],
  timer:['punishTimerCache','sceneTime','isPunishDuration'],
  root+'ollie/intelligent/qos/QosTimer$TimerCache;':['error','startTime','duration'],
  root+'ollie/intelligent/qos/QosResponse;':['code','duration','msg','remoteMessage'],

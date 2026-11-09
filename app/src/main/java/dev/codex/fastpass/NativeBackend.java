@@ -16,9 +16,7 @@ import android.provider.Settings;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -34,12 +32,20 @@ public final class NativeBackend {
     private final ThreadLocal<Session> initiating = new ThreadLocal<>();
     private final ThreadLocal<Session> cloudChecking = new ThreadLocal<>();
     private final ThreadLocal<Session> completing = new ThreadLocal<>();
-    private final Map<Integer, BearerSnapshot> lastReports = new java.util.HashMap<>();
+    private final Map<Integer, BearerSnapshot> lastReports = new java.util.concurrent.ConcurrentHashMap<>();
+    private final AutoRequestIndex<Session> sessions = new AutoRequestIndex<>(24);
+    private final java.util.concurrent.ConcurrentHashMap<String,Long> gateTimes = new java.util.concurrent.ConcurrentHashMap<>();
+    private final JSONArray gateRows = new JSONArray();
+    private NativeAutoHooks autoHooks;
+    private volatile boolean autoEnabled;
+    private boolean autoHookReady;
     private volatile Session active;
     private Class<?> managerClass, requestClass, timerClass, stateClass, utilsClass, linkClass;
     private Object manager;
-    private boolean ready, bypassHook, cloudHook, bearerHook, auditHook;
-    private String version = "unknown", compatibilityError = "";
+    private volatile boolean ready;
+    private boolean bypassHook, cloudHook, bearerHook, auditHook;
+    private String version = "unknown";
+    private volatile String compatibilityError = "";
     private int installAttempts;
 
     private static final class BearerSnapshot {
@@ -55,14 +61,17 @@ public final class NativeBackend {
         final boolean bypass;
         final OutcomePolicy.Evidence e = new OutcomePolicy.Evidence();
         volatile Object requestInfo;
+        NativeAutoHooks.Origin origin;
+        String scene = "", cause = "";
+        int requestedMinutes;
         long sentAt;
         long sentElapsed;
         int slot = -1;
-        int qci = 6;
-        int duration = 30;
+        int qci = -1;
+        int duration;
         Integer returnedDuration;
         Integer nativeResult;
-        boolean activeNow, monitorStarted, localBypassApplied;
+        boolean activeNow, localBypassApplied, commonBypassApplied;
         long bearerAt;
         String telecom = "尚未收到鉴权回调", transport = "", msg = "", remoteMsg = "", applyId = "";
         String cloudRaw = "", telecomErrorCode = "", telecomErrorMessage = "";
@@ -99,6 +108,135 @@ public final class NativeBackend {
     private static String clean(Object object) {
         return WireAudit.clean(object == null ? "" : String.valueOf(object));
     }
+    private boolean enabled() { return ready && autoEnabled && compatibilityError.isEmpty(); }
+    private boolean readAutoControl() {
+        boolean previous = autoEnabled;
+        try {
+            Bundle b = context.getContentResolver().call(Protocol.BRIDGE, "controls", null, null);
+            autoEnabled = b != null && b.getBoolean("autoEnabled", false);
+        } catch (Throwable t) { autoEnabled = false; event("读取自动控制失败：" + describe(t)); }
+        return previous != autoEnabled;
+    }
+    private void noteAutoGate(String name, JSONObject details) {
+        String key = name + details.toString();
+        long now = SystemClock.elapsedRealtime();
+        Long old = gateTimes.put(key, now);
+        if (old != null && now - old < 3000L) return;
+        if (gateTimes.size() > 128) gateTimes.clear();
+        worker.post(() -> {
+            gateRows.put(json("at", System.currentTimeMillis(), "gate", name, "details", details));
+            while (gateRows.length() > 40) gateRows.remove(0);
+            publish(json("autoGates", gateRows, "lastNativeAutoEvent", details, "lastNativeAutoEventAt", System.currentTimeMillis()),
+                "[自动流程] " + name + " " + details);
+        });
+    }
+    private static final String MESSAGE_SESSION = "fastpass.native.auto.session";
+    private Session sessionForManager(Object m) {
+        try { return sessions.get(XposedHelpers.getObjectField(m, "dbRequestInfo")); }
+        catch (Throwable ignored) { return null; }
+    }
+    private Session sessionForBody(String body) {
+        for (Session s : sessions.snapshot()) {
+            try {
+                String id = String.valueOf(XposedHelpers.callMethod(s.requestInfo, "getApplyId"));
+                if (WireAudit.matches(body, id)) return s;
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+    private void tagNativeCallback(Object m, Session s) {
+        try {
+            Object message = XposedHelpers.getObjectField(m, "qosMessage");
+            if (message instanceof Message) XposedHelpers.setAdditionalInstanceField(message, MESSAGE_SESSION, s);
+        } catch (Throwable t) { event("原生回调关联不可用：" + describe(t)); }
+    }
+    private void installNativeAuto() {
+        autoHooks = new NativeAutoHooks(loader, new NativeAutoHooks.Sink() {
+            @Override public boolean enabled() { return NativeBackend.this.enabled(); }
+            @Override public void note(String name, JSONObject details) { noteAutoGate(name, details); }
+        });
+        autoHooks.install();
+        XposedHelpers.findAndHookMethod(managerClass, "requestDedicatedBearer", requestClass, Message.class, new XC_MethodHook() {
+            @Override protected void beforeHookedMethod(MethodHookParam p) {
+                if (p.args[0] == null || p.args[1] == null) return;
+                NativeAutoHooks.Origin origin = autoHooks.originFor(p.args[0]);
+                if (origin == null) {
+                    noteAutoGate("native.unmanagedRequest", json("scene", clean(XposedHelpers.callMethod(p.args[0], "getScene")),
+                        "reason", "手动或自动来源未确认；保留原生，不修改参数和判断"));
+                    return;
+                }
+                try {
+                    final Session s = captureNativeRequest(p.args[0], origin);
+                    sessions.put(p.args[0], s); active = s;
+                    initiating.set(s); p.setObjectExtra(MESSAGE_SESSION, s);
+                    XposedHelpers.setAdditionalInstanceField(p.args[1], MESSAGE_SESSION, s);
+                } catch (Throwable t) { event("原生自动申请观察失败，继续原生执行：" + describe(t)); }
+            }
+            @Override protected void afterHookedMethod(MethodHookParam p) {
+                Object value = p.getObjectExtra(MESSAGE_SESSION);
+                if (!(value instanceof Session)) return;
+                initiating.remove();
+                final Session s = (Session) value;
+                try { s.applyId = clean(XposedHelpers.callMethod(s.requestInfo, "getApplyId")); }
+                catch (Throwable ignored) {}
+                if (p.hasThrowable()) s.e.error = "原生调用抛出：" + describe(p.getThrowable());
+                worker.post(() -> {
+                    emit(s, "系统原生自动申请：" + s.scene + " / QCI " + s.qci + " / " + s.requestedMinutes + " 分钟；参数与回调保持原样");
+                    if (s.e.localCode == null) emit(s, "未观察到本地校验 Hook 命中；不声明本次绕过已应用");
+                    worker.postDelayed(() -> monitor(s), 2000L);
+                });
+            }
+        });
+        XposedHelpers.findAndHookMethod(cls("ollie.transportlayer.feature.transportlayerselfcure.dataacceleration.DataAccelerateScene"),
+            "handleDbCloudDone", Message.class, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (p.args[0] == null) return;
+                    Object tag = XposedHelpers.removeAdditionalInstanceField(p.args[0], MESSAGE_SESSION);
+                    if (!(tag instanceof Session)) return;
+                    final Session s = (Session) tag;
+                    if (s.origin == null || s.origin.scene.get() != p.thisObject) return;
+                    try {
+                        Object ar = ((Message) p.args[0]).obj;
+                        Object result = ar == null ? null : XposedHelpers.getObjectField(ar, "userObj");
+                        final Integer code = result instanceof Integer ? (Integer) result : null;
+                        JSONObject quota = quotaSnapshot(s.scene);
+                        worker.post(() -> { s.nativeResult = code; s.e.engineFinished = true; s.quotaAfter = quota;
+                            emit(s, "原生场景收到自己的完成回调：" + code + "（仅参考）"); });
+                    } catch (Throwable t) { event("原生场景回调观察失败：" + describe(t)); }
+                }
+            });
+        NativeAutoHooks.deoptimize(managerClass, "requestDedicatedBearer", "doWhenQosSuccess", "handleTelecomReturn");
+        autoHookReady = true;
+    }
+    private Session captureNativeRequest(Object info, NativeAutoHooks.Origin origin) throws Exception {
+        Session s = new Session(java.util.UUID.randomUUID().toString(), enabled());
+        s.requestInfo = info; s.origin = origin;
+        s.scene = String.valueOf(XposedHelpers.callMethod(info, "getScene"));
+        s.cause = String.valueOf(XposedHelpers.callMethod(info, "getQosCause"));
+        s.qci = (Integer) XposedHelpers.callMethod(info, "getQciType");
+        s.requestedMinutes = (Integer) XposedHelpers.callMethod(info, "getDuration");
+        s.duration = Math.max(0, Math.min(s.requestedMinutes, 1440));
+        s.plmn = String.valueOf(XposedHelpers.callMethod(info, "getPlmn"));
+        s.carrier = OperatorRoute.label(s.plmn); s.telecomRequired = OperatorRoute.needsTelecomToken(s.plmn);
+        s.telecom = s.telecomRequired ? "等待原生电信鉴权" : "原生非电信分支，无需电信令牌";
+        int currentSlot = slot(state());
+        s.slot = origin.slot; s.e.attributionUncertain = currentSlot != s.slot || s.slot < 0;
+        s.quotaBefore = quotaSnapshot(s.scene);
+        s.sentAt = System.currentTimeMillis(); s.sentElapsed = SystemClock.elapsedRealtime();
+        s.preflight = json("source", "原生 DBRequestInfo 只读快照，未构造或改写", "origin", origin.json(),
+            "slotAtQosManager", currentSlot, "slotChanged", s.e.attributionUncertain, "plmn", s.plmn, "rat", XposedHelpers.callMethod(info, "getRat"),
+            "scene", s.scene, "cause", s.cause, "qciRequested", s.qci, "durationRequested", s.requestedMinutes,
+            "capturedAt", s.sentAt, "timeZone", java.util.TimeZone.getDefault().getID());
+        try {
+            s.bearers = listJson((List<?>) XposedHelpers.callMethod(singleton(linkClass), "getDedicatedBearInfoList", s.slot));
+            s.e.baselineActive = hasActive(s.bearers, s.qci);
+        } catch (Throwable ignored) { s.bearers = new JSONArray(); }
+        BearerSnapshot prior = lastReports.get(s.slot);
+        s.e.baselineKnown = prior != null && OutcomePolicy.reliableBaseline(prior.elapsed, s.sentElapsed);
+        if (s.e.baselineKnown) s.e.baselineActive |= hasActive(prior.list, s.qci);
+        s.e.bearerActive = s.e.baselineActive;
+        return s;
+    }
     private void install() {
         if (ready) return;
         installAttempts++;
@@ -111,11 +249,14 @@ public final class NativeBackend {
             utilsClass = cls("framework.utils.BoosterUtils");
             linkClass = cls("ollie.transportlayer.framework.intf.link.LinkLayerProxy");
             manager = singleton(managerClass);
+            compatibilityError = "70.1.0.1".equals(version) ? "" : "后端版本不匹配，仅观察";
+            readAutoControl();
+            if (!autoHookReady) installNativeAuto();
             if (!bypassHook) installValidationHook();
             if (!cloudHook) installCloudHooks();
             if (!bearerHook) installBearerHook();
             if (!auditHook) installAuditHooks();
-            ready = bypassHook && cloudHook && bearerHook && auditHook;
+            ready = bypassHook && cloudHook && bearerHook && auditHook && autoHookReady;
             compatibilityError = "70.1.0.1".equals(version) ? "" : "后端版本与分析版本 70.1.0.1 不同，仅启用观察";
             publish(json("sessionId", "", "sessionOpen", false, "verdict", "IDLE", "startedAt", 0,
                 "requestSentAt", 0, "localCode", null, "cloudCode", null, "cloudReceived", false,
@@ -129,7 +270,7 @@ public final class NativeBackend {
                 "vendorSlots", new JSONArray(), "httpStatus", null, "commonLocalCode", null, "returnedMinutes", null), null);
             publish(json("backendReady", ready, "backendVersion", version, "bypassReady", bypassHook,
                 "cloudObserverReady", cloudHook, "bearerObserverReady", bearerHook,
-                "wireAuditReady", auditHook, "moduleVersion", Protocol.VERSION,
+                "wireAuditReady", auditHook, "moduleVersion", Protocol.VERSION, "autoEnabled", autoEnabled, "autoControlReady", ready && compatibilityError.isEmpty(), "requestMode", "SYSTEM_NATIVE_AUTO",
                 "compatibilityError", compatibilityError, "connectedAt", System.currentTimeMillis()),
                 "系统服务 Hook 已加载，后端 " + version);
             refresh();
@@ -143,7 +284,7 @@ public final class NativeBackend {
         XposedHelpers.findAndHookMethod(managerClass, "checkIfQosReqLegal", requestClass, new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
                 Session s = initiating.get();
-                if (s == null || !s.bypass || p.args[0] != s.requestInfo) return;
+                if (s == null || !s.bypass || !enabled() || p.args[0] != s.requestInfo) return;
                 try {
                     int result = -1;
                     if (!(Boolean) XposedHelpers.callMethod(p.thisObject, "isStart")) result = 101;
@@ -181,18 +322,14 @@ public final class NativeBackend {
         } catch (Throwable t) { event("显式去优化接口不可用，将核对实际 Hook 命中：" + describe(t)); }
         bypassHook = true;
     }
-    private boolean owns(Session s, Object possibleManager) {
-        if (s == null || s.requestInfo == null || s != active) return false;
-        try { return XposedHelpers.getObjectField(possibleManager, "dbRequestInfo") == s.requestInfo; }
-        catch (Throwable ignored) { return false; }
-    }
     private void installCloudHooks() {
         Class<?> taskResult = cls("framework.cloudinter.common.CloudTaskResult");
         XposedHelpers.findAndHookMethod(managerClass, "doWhenQosSuccess", taskResult, new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
-                final Session s = active;
-                if (!owns(s, p.thisObject)) return;
+                final Session s = sessionForManager(p.thisObject);
+                if (s == null) return;
                 completing.set(s);
+                tagNativeCallback(p.thisObject, s);
                 try {
                     Object task = p.args[0];
                     Object error = XposedHelpers.callMethod(task, "getErrorCode");
@@ -205,8 +342,7 @@ public final class NativeBackend {
                     final int duration = actualResponse ? XposedHelpers.getIntField(response, "duration") : 0;
                     final String transport = clean(error);
                     worker.post(() -> {
-                        if (active != s) return;
-                        s.e.cloudReceived = actualResponse;
+                                                s.e.cloudReceived = actualResponse;
                         s.e.cloudCode = code;
                         s.msg = message; s.remoteMsg = remote; s.transport = transport;
                         s.returnedDuration = actualResponse ? duration : null;
@@ -221,22 +357,22 @@ public final class NativeBackend {
             @Override protected void afterHookedMethod(MethodHookParam p) {
                 Session s = completing.get(); completing.remove();
                 if (s == null) return;
-                JSONObject after = quotaSnapshot();
-                worker.post(() -> { if (active == s) { s.quotaAfter = after; emit(s, "原生完成后本地计数/冷却：" + after); } });
+                JSONObject after = quotaSnapshot(s.scene);
+                worker.post(() -> { s.quotaAfter = after; s.e.engineFinished = true; emit(s, "原生完成后本地计数/冷却：" + after); });
             }
         });
         Class<?> async = XposedHelpers.findClass("android.os.AsyncResult", loader);
         XposedHelpers.findAndHookMethod(managerClass, "handleTelecomReturn", async, new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
-                final Session s = active;
-                if (!owns(s, p.thisObject) || p.args[0] == null) return;
+                final Session s = sessionForManager(p.thisObject);
+                if (s == null || p.args[0] == null) return;
+                tagNativeCallback(p.thisObject, s);
                 try {
                     Object flag = XposedHelpers.getObjectField(p.args[0], "userObj");
                     final boolean success = flag instanceof Integer && ((Integer) flag) == 1;
                     // Intentionally never read AsyncResult.result when it contains the returned token.
                     worker.post(() -> {
-                        if (active != s) return;
-                        s.e.telecomFailed = !success;
+                                                s.e.telecomFailed = !success;
                         s.telecom = success ? "电信已返回令牌，已交由原生服务使用" : "电信鉴权失败";
                         emit(s, s.telecom);
                     });
@@ -251,8 +387,8 @@ public final class NativeBackend {
                 if (a.length != 4 || a[0] != String[].class || a[1] != int.class || a[2] != String.class || a[3] != byte[].class) continue;
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam p) {
-                        final Session s = active;
-                        if (!owns(s, manager)) return;
+                        final Session s = sessionForManager(manager);
+                        if (s == null) return;
                         try {
                             final int http = (Integer) p.args[1];
                             byte[] body = (byte[]) p.args[3];
@@ -261,8 +397,7 @@ public final class NativeBackend {
                             final String code = err == null ? "" : clean(err.optString("code", ""));
                             final String msg = err == null ? "" : clean(err.optString("message", ""));
                             worker.post(() -> {
-                                if (active != s) return;
-                                s.telecomHttp = http; s.telecomErrorCode = code; s.telecomErrorMessage = msg;
+                                                                s.telecomHttp = http; s.telecomErrorCode = code; s.telecomErrorMessage = msg;
                                 emit(s, "电信鉴权 HTTP " + http + (code.isEmpty() ? "" : "，错误码 " + code));
                             });
                         } catch (Throwable ignored) {
@@ -274,14 +409,14 @@ public final class NativeBackend {
         } catch (Throwable t) { event("电信 HTTP 细节观察点不可用，保留原生鉴权结果：" + describe(t)); }
         cloudHook = true;
     }
-    private JSONObject quotaSnapshot() {
+    private JSONObject quotaSnapshot(String scene) {
         try {
             Object timer = singleton(timerClass);
             synchronized (timer) {
                 Map<?, ?> times = (Map<?, ?>) XposedHelpers.getObjectField(timer, "sceneTime");
                 Object cache = XposedHelpers.getObjectField(timer, "punishTimerCache");
                 return json("readAt", System.currentTimeMillis(), "base", times.get("Base"),
-                    "manual", times.get("Manual"), "fail", times.get("Fail"),
+                    "manual", times.get("Manual"), "fail", times.get("Fail"), "scene", scene, "sceneRemaining", times.get(scene),
                     "cooldown", XposedHelpers.getBooleanField(timer, "isPunishDuration"),
                     "cooldownCode", XposedHelpers.getIntField(cache, "error"),
                     "cooldownMinutes", XposedHelpers.getIntField(cache, "duration"),
@@ -320,12 +455,10 @@ public final class NativeBackend {
         return out;
     }
     private Session ownCloudTask(Object task) {
-        Session s = active;
-        if (s == null) return null;
         try {
             Object request = XposedHelpers.getObjectField(task, "requestBody");
-            if (cls("ollie.intelligent.qos.QosRequest").isInstance(request)
-                && XposedHelpers.callMethod(request, "getDBRequestInfo") == s.requestInfo) return s;
+            if (cls("ollie.intelligent.qos.QosRequest").isInstance(request))
+                return sessions.get(XposedHelpers.callMethod(request, "getDBRequestInfo"));
         } catch (Throwable ignored) {}
         return null;
     }
@@ -334,13 +467,13 @@ public final class NativeBackend {
         XposedHelpers.findAndHookMethod(executor, "executeTask", cls("framework.cloudinter.common.RequestBody"), Message.class,
             cls("framework.intf.ISaveCloudData"), new XC_MethodHook() {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    final Session s = active;
-                    if (s == null || !cls("ollie.intelligent.qos.QosRequest").isInstance(p.args[0])) return;
+                    if (!cls("ollie.intelligent.qos.QosRequest").isInstance(p.args[0])) return;
+                    final Session s = sessions.get(XposedHelpers.callMethod(p.args[0], "getDBRequestInfo"));
+                    if (s == null) return;
                     try {
-                        if (XposedHelpers.callMethod(p.args[0], "getDBRequestInfo") != s.requestInfo) return;
                         cloudChecking.set(s);
                         JSONObject before = commonBudget(p.thisObject);
-                        worker.post(() -> { if (active == s) { s.commonChecks = json("before", before, "bypassed", false); emit(s, "进入通用云请求本地检查，业务 1004：" + before); } });
+                        worker.post(() -> { s.commonChecks = json("before", before, "bypassed", false); emit(s, "进入通用云请求本地检查，业务 1004：" + before); });
                     } catch (Throwable t) { event("通用检查观察异常：" + describe(t)); }
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -349,7 +482,6 @@ public final class NativeBackend {
                     final int code = ((Message) p.args[1]).arg1;
                     JSONObject after = commonBudget(p.thisObject);
                     worker.post(() -> {
-                        if (active != s) return;
                         s.e.commonLocalCode = code;
                         try { s.commonChecks.put("after", after).put("executorCode", code); } catch (Exception ignored) {}
                         emit(s, "通用本地检查返回 " + code + "；1004=继续，101=本地次数，102=协议同意，103=并发");
@@ -361,42 +493,45 @@ public final class NativeBackend {
                 final Session s = cloudChecking.get();
                 if (s == null || ((Integer) p.args[0]) != 1004) return;
                 final boolean hit = !p.hasThrowable() && Boolean.TRUE.equals(p.getResult());
+                final JSONObject budget = commonBudget(p.thisObject);
+                final boolean applied = !p.hasThrowable() && AutoPolicy.bypassCommonLimit(enabled() && s.bypass,
+                    s.origin != null, budget.optBoolean("configLoaded"), hit);
+                if (applied) { p.setResult(false); s.commonBypassApplied = true; }
                 worker.post(() -> {
-                    if (active != s) return;
-                    try { s.commonChecks.put("dailyCheckObserved", true).put("exceeded", hit); } catch (Exception ignored) {}
-                    emit(s, "通用接口每日次数检查：" + (hit ? "已拦截，本次不会进入 HTTP" : "通过"));
+                    try { s.commonChecks.put("dailyCheckObserved", true).put("rawExceeded", hit)
+                        .put("effectiveExceeded", hit && !applied).put("bypassed", applied)
+                        .put("counterNote", applied ? "保留原生计数；超限路径原本不再加一，模块未重置或伪造次数" : "原生计数路径"); } catch (Exception ignored) {}
+                    emit(s, "公共每日次数检查：" + (applied ? "仅对本次原生自动申请放行" : hit ? "原生拦截，未放行" : "原生通过"));
                 });
             }
         });
         Class<?> http = cls("framework.cloudinter.common.HttpRequest");
         XposedHelpers.findAndHookMethod(http, "request", cls("framework.cloudinter.common.HttpResponse"), new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
-                final Session s = active;
-                if (s == null) return;
                 try {
                     String url = (String) XposedHelpers.getObjectField(p.thisObject, "url");
                     String body = (String) XposedHelpers.getObjectField(p.thisObject, "body");
-                    String id = (String) XposedHelpers.callMethod(s.requestInfo, "getApplyId");
-                    if (url == null || !url.endsWith("/dedicatedbearer/v1/apply") || !WireAudit.matches(body, id)) return;
+                    if (url == null || !url.endsWith("/dedicatedbearer/v1/apply")) return;
+                    final Session s = sessionForBody(body);
+                    if (s == null) return;
                     Object auth = XposedHelpers.getObjectField(p.thisObject, "auth");
                     JSONObject audit = WireAudit.request(body, (Map<?, ?>) XposedHelpers.getObjectField(p.thisObject, "heads"),
                         auth instanceof String && !((String) auth).isEmpty(), url);
                     audit.put("enteredAt", System.currentTimeMillis()).put("enteredElapsed", SystemClock.elapsedRealtime());
                     java.util.regex.Matcher stamp = java.util.regex.Pattern.compile("timestamp=(\\d+)").matcher(auth instanceof String ? (String) auth : "");
                     if (stamp.find()) audit.put("signatureTimestamp", Long.parseLong(stamp.group(1)));
-                    audit.put("network", networkSnapshot()).put("bypassScope", "仅 QoS 冷却和场景次数；保留公共接口每日次数/协议/并发/签名检查");
-                    worker.post(() -> { if (active == s) { s.requestAudit = audit; emit(s, "已到原生 HTTP 发送层；实际 body/headers 已脱敏记录"); } });
+                    audit.put("network", networkSnapshot()).put("bypassScope", "原生自动场景；仅放行本地策略/冷却/次数，保留真实网络、参数、并发、重复、协议与签名");
+                    worker.post(() -> { { s.requestAudit = audit; emit(s, "已到原生 HTTP 发送层；实际 body/headers 已脱敏记录"); } });
                 } catch (Throwable t) { event("HTTP 请求审计失败：" + describe(t)); }
             }
         });
         XposedHelpers.findAndHookMethod(http, "handleResponse", javax.net.ssl.HttpsURLConnection.class,
             cls("framework.cloudinter.common.HttpResponse"), new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
-                    final Session s = active;
-                    if (s == null) return;
                     try {
                         String body = (String) XposedHelpers.getObjectField(p.thisObject, "body");
-                        if (!WireAudit.matches(body, (String) XposedHelpers.callMethod(s.requestInfo, "getApplyId"))) return;
+                        final Session s = sessionForBody(body);
+                        if (s == null) return;
                         javax.net.ssl.HttpsURLConnection c = (javax.net.ssl.HttpsURLConnection) p.args[0];
                         final int status = c.getResponseCode();
                         JSONObject details = json("status", status, "contentType", clean(c.getContentType()),
@@ -419,8 +554,7 @@ public final class NativeBackend {
                             } catch (Throwable t) { details.put("errorBodyReadError", t.getClass().getSimpleName()); }
                         }
                         worker.post(() -> {
-                            if (active != s) return;
-                            s.e.httpStatus = status;
+                                                        s.e.httpStatus = status;
                             try { java.util.Iterator<String> it = details.keys(); while (it.hasNext()) { String k = it.next(); s.httpResponse.put(k, details.get(k)); } } catch (Exception ignored) {}
                             emit(s, "荣耀申请接口实际 HTTP 状态：" + status);
                         });
@@ -444,13 +578,16 @@ public final class NativeBackend {
                         JSONObject details = json("status", status, "contentType", clean(p.args[1]),
                             "parsedBeforeNativeMapping", body, "responseBytes", bytes == null ? 0 : bytes.length,
                             "callbackAt", System.currentTimeMillis());
-                        worker.post(() -> { if (active == s) { s.httpResponse = details; s.e.httpStatus = status; emit(s, "已记录原生反序列化前的云端 JSON 字段"); } });
+                        worker.post(() -> { { s.httpResponse = details; s.e.httpStatus = status; emit(s, "已记录原生反序列化前的云端 JSON 字段"); } });
                     } catch (Throwable t) { event("云端原始 JSON 审计失败：" + describe(t)); }
                 }
             });
             rawHooks++;
         }
         if (rawHooks == 0) throw new IllegalStateException("未找到原始 HTTP 响应观察接口");
+        NativeAutoHooks.deoptimize(executor, "executeTask");
+        NativeAutoHooks.deoptimize(http, "request");
+        NativeAutoHooks.deoptimize(cls("framework.cloudinter.CloudReqTask"), "doInBackground", "httpRequestCloudServer");
         auditHook = true;
     }
     private void installBearerHook() {
@@ -495,20 +632,17 @@ public final class NativeBackend {
         publish(json("observedSlot", slot, "observedBearers", list, "observedAt", received,
             "vendorSlots", vendorReports(), "bearerSource", "电话框架消息 105 → Booster 回调 2001"),
             "收到 SIM " + (slot + 1) + " 的真实承载列表：" + list);
-        Session s = active;
-        if (s == null || slot != s.slot || terminal(s)) return;
-        s.bearers = list; s.bearerAt = received;
-        boolean wasActive = s.e.bearerActive;
-        s.e.bearerActive = hasActive(list, s.qci);
-        s.e.bearerFresh = OutcomePolicy.freshForSession(slot, s.slot, receivedElapsed, s.sentElapsed);
-        // An un-timestamped empty native cache is not evidence of prior absence.
-        // A fresh inactive report followed by an active one also establishes a transition.
-        if (!s.e.baselineKnown && !s.e.baselineActive && !s.activeNow
-            && s.e.bearerFresh && !s.e.bearerActive) s.e.baselineKnown = true;
-        if (wasActive && !s.e.bearerActive && s.activeNow) s.e.ended = true;
-        if (s.e.bearerActive && s.e.bearerFresh) s.activeNow = true;
-        emit(s, s.e.bearerActive ? "已观察到匹配的活跃专用承载" : "本次回报无匹配的活跃专用承载");
-        if (terminal(s)) releaseMonitor(s);
+        for (Session s : sessions.snapshot()) {
+            if (slot != s.slot || terminal(s)) continue;
+            s.bearers = list; s.bearerAt = received;
+            boolean wasActive = s.e.bearerActive;
+            s.e.bearerActive = hasActive(list, s.qci);
+            s.e.bearerFresh = OutcomePolicy.freshForSession(slot, s.slot, receivedElapsed, s.sentElapsed);
+            if (!s.e.baselineKnown && !s.e.baselineActive && !s.activeNow && s.e.bearerFresh && !s.e.bearerActive) s.e.baselineKnown = true;
+            if (wasActive && !s.e.bearerActive && s.activeNow) s.e.ended = true;
+            if (s.e.bearerActive && s.e.bearerFresh) s.activeNow = true;
+            emit(s, s.e.bearerActive ? "收到与该原生自动请求匹配的活跃承载" : "回报中无匹配活跃承载");
+        }
     }
     private void consumeCommand() {
         try {
@@ -517,14 +651,23 @@ public final class NativeBackend {
             String raw = data.getString("command", "");
             if (raw.isEmpty()) return;
             JSONObject command = new JSONObject(raw);
-            if (System.currentTimeMillis() - command.optLong("createdAt") > 30000L) { event("忽略已过期的面板命令"); return; }
+            boolean changed = readAutoControl();
+            if (changed) {
+                publish(json("autoEnabled", autoEnabled), "已同步最新原生自动放行设置");
+                if (autoHooks != null) autoHooks.reevaluateExisting();
+            }
+            if (System.currentTimeMillis() - command.optLong("createdAt") > 30000L) { event("过期命令不再执行；最新持久设置已同步"); refresh(); return; }
             String type = command.getString("type");
             publish(json("lastCommandId", command.optString("id"), "lastCommandType", type,
                 "lastCommandAt", System.currentTimeMillis(), "lastCommandError", ""),
                 "refresh".equals(type) ? null : "收到命令 " + type + " / " + command.optString("id"));
             if ("refresh".equals(type)) { if (!ready) install(); else refresh(); }
-            else if ("stop".equals(type)) stopObservation();
-            else if ("request".equals(type)) request(command.getString("id"), command.optBoolean("bypass", true));
+            else if ("setAuto".equals(type)) {
+                readAutoControl();
+                publish(json("autoEnabled", autoEnabled, "autoControlReady", ready && compatibilityError.isEmpty()), autoEnabled ? "已开启原生自动条件放行；等待系统场景" : "已关闭条件放行；后续沿用原生判断");
+                if (!changed && autoHooks != null) autoHooks.reevaluateExisting();
+                refresh();
+            }
         } catch (Throwable t) { publish(json("lastCommandError", describe(t)), "面板命令处理失败：" + describe(t)); }
     }
     private Object state() { return singleton(stateClass); }
@@ -554,7 +697,7 @@ public final class NativeBackend {
             JSONArray cached = cachedBearers(slot);
             boolean ipv4Ready = XposedHelpers.callMethod(st, "getCellularIpv4Addr", slot) != null;
             boolean ipv6Ready = XposedHelpers.callMethod(st, "getCellularIpv6Addr", slot) != null;
-            JSONObject snapshot = json("backendReady", ready, "backendVersion", version,
+            JSONObject snapshot = json("backendReady", ready, "backendVersion", version, "autoEnabled", autoEnabled, "autoControlReady", ready && compatibilityError.isEmpty(), "requestMode", "SYSTEM_NATIVE_AUTO",
                 "compatibilityError", compatibilityError, "backendSeenAt", System.currentTimeMillis(),
                 "refreshError", "",
                 "defaultSlot", slot, "cachedBearers", cached, "cacheReadAt", System.currentTimeMillis(),
@@ -576,114 +719,16 @@ public final class NativeBackend {
                 "cooldownMinutes", XposedHelpers.getIntField(cache, "duration"),
                 "baseRemaining", quotas.get("Base"), "manualRemaining", quotas.get("Manual"), "failRemaining", quotas.get("Fail"));
             snapshot.put("commonCloudBudget", commonBudget(singleton(cls("framework.intf.CloudReqTaskExecutor"))));
+            JSONObject sceneQuotas = new JSONObject();
+            for (int id : new int[]{7,8,9,10,14,15,16,19}) {
+                String scene = AutoPolicy.sceneName(id);
+                sceneQuotas.put(scene, quotas.containsKey(scene) ? quotas.get(scene) : JSONObject.NULL);
+            }
+            snapshot.put("autoSceneQuotas", sceneQuotas);
+            if (autoHooks != null) snapshot.put("nativeAutoManager", autoHooks.snapshot());
             snapshot.put("vendorSlots", vendorReports());
             publish(snapshot, null);
         } catch (Throwable t) { publish(json("backendSeenAt", System.currentTimeMillis(), "refreshError", describe(t)), "读取原生状态失败：" + describe(t)); }
-    }
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private void request(String id, boolean bypass) {
-        if (!ready || !compatibilityError.isEmpty()) {
-            publish(json("lastCommandError", "当前后端接口未就绪或版本不匹配"), "未发送：后端接口未就绪或版本不匹配"); return;
-        }
-        Session old = active;
-        if (old != null && !terminal(old)) { publish(json("lastCommandError", "当前请求仍在观察中，未重复提交"), "当前请求仍在观察中，未重复提交"); return; }
-        try {
-            if (XposedHelpers.getBooleanField(manager, "isTaskExecuting")) { publish(json("lastCommandError", "原生服务已有请求正在执行"), "原生服务已有请求正在执行，未提交新请求"); return; }
-            Object st = state();
-            int slot = slot(st);
-            if (slot < 0 || slot > 1) throw new IllegalStateException("未取得有效的上网卡槽");
-            if (!(Boolean) XposedHelpers.callMethod(manager, "isStart")) throw new IllegalStateException("原生 QosManager 未启动");
-            if (!(Boolean) XposedHelpers.callMethod(st, "isDataOn")) throw new IllegalStateException("请开启蜂窝数据");
-            if ((Boolean) XposedHelpers.callMethod(st, "isWifiConnected")) throw new IllegalStateException("请断开 WLAN 后再申请");
-            if ((Boolean) XposedHelpers.callMethod(st, "isVpnModeSwitchOn")) throw new IllegalStateException("请停用 VPN 后再申请");
-            if ((Boolean) XposedHelpers.callMethod(st, "isDataRoaming", slot)) throw new IllegalStateException("请在非漫游状态下测试");
-            int sub = (Integer) XposedHelpers.callStaticMethod(utilsClass, "convertSlotIdToSubId", slot);
-            Object phone = XposedHelpers.callStaticMethod(utilsClass, "getTelephonyManager");
-            String plmn = (String) XposedHelpers.callMethod(phone, "getSimOperator", sub);
-            InetAddress v4 = (InetAddress) XposedHelpers.callMethod(st, "getCellularIpv4Addr", slot);
-            InetAddress v6 = (InetAddress) XposedHelpers.callMethod(st, "getCellularIpv6Addr", slot);
-            if (plmn == null || plmn.isEmpty() || v4 == null) throw new IllegalStateException("原生申请所需的 PLMN 或蜂窝 IPv4 尚未就绪");
-            int rat;
-            if ((Boolean) XposedHelpers.callMethod(st, "isNetworkType4G", slot)) rat = 1;
-            else if ((Boolean) XposedHelpers.callMethod(st, "isNetworkTypeSaNsaEnDcActive", slot)) rat = 2;
-            else throw new IllegalStateException("当前制式未满足原生 4G/5G 条件");
-            boolean telecom = OperatorRoute.needsTelecomToken(plmn);
-            if (telecom) {
-                Object config = singleton(cls("ollie.intelligent.qos.QosConfig"));
-                Map<?, ?> ids = (Map<?, ?>) XposedHelpers.callMethod(config, "getTokenAppid");
-                Object appId = ids == null ? null : ids.get("6");
-                if (appId == null || String.valueOf(appId).isEmpty()) throw new IllegalStateException("原生电信 QCI 6 AppID 未加载");
-            }
-            Class<? extends Enum> scene = (Class<? extends Enum>) cls("framework.intf.intelligent.QosConst$Scene");
-            Class<? extends Enum> cause = (Class<? extends Enum>) cls("framework.intf.intelligent.QosConst$Cause");
-            Constructor<?> ctor = requestClass.getConstructor(String.class, int.class, int.class, scene, cause, String.class, List.class, int.class);
-            Object info = ctor.newInstance(plmn, rat, 6, Enum.valueOf(scene, "Manual"), Enum.valueOf(cause, "Scene"),
-                v4.getHostAddress(), new ArrayList<String>(), 30);
-            XposedHelpers.callMethod(info, "setIpv6", v6 == null ? "" : v6.getHostAddress());
-            Session s = new Session(id, bypass);
-            s.slot = slot; s.requestInfo = info;
-            s.quotaBefore = quotaSnapshot();
-            s.preflight = json("slot", slot, "subId", sub, "plmn", plmn, "rat", rat,
-                "qciRequested", 6, "scene", "Manual", "cause", "Scene", "durationRequested", 30,
-                "ipv4Present", v4 != null, "ipv6Present", v6 != null,
-                "managerStarted", true, "dataOn", true, "wifi", false, "vpn", false, "roaming", false,
-                "qosPeriod", XposedHelpers.callMethod(st, "getQosPeriodStatus"),
-                "capturedAt", System.currentTimeMillis(), "timeZone", java.util.TimeZone.getDefault().getID());
-            s.carrier = OperatorRoute.label(plmn); s.plmn = plmn; s.telecomRequired = telecom;
-            try {
-                s.bearers = listJson((List<?>) XposedHelpers.callMethod(singleton(linkClass), "getDedicatedBearInfoList", slot));
-                s.e.baselineActive = hasActive(s.bearers, s.qci);
-            } catch (Throwable ignored) { s.e.baselineKnown = false; s.bearers = new JSONArray(); }
-            BearerSnapshot previous = lastReports.get(slot);
-            s.e.baselineKnown = previous != null && OutcomePolicy.reliableBaseline(previous.elapsed, SystemClock.elapsedRealtime());
-            if (s.e.baselineKnown) s.e.baselineActive |= hasActive(previous.list, s.qci);
-            s.e.bearerActive = s.e.baselineActive;
-            s.telecom = telecom ? "等待电信鉴权" : s.carrier + "：原生直接申请分支，无需电信令牌";
-            if (old != null) releaseMonitor(old);
-            active = s;
-            publish(json("lastCommandError", "", "observedBearers", new JSONArray(), "observedAt", 0,
-                "observedSlot", -1), "开始一次原生请求；目标 SIM " + (slot + 1) + " / QCI 6");
-            emit(s, s.e.baselineActive ? "请求前缓存含活跃 QCI 6，后续不直接归因于本次请求"
-                : s.e.baselineKnown ? "请求前新鲜回报未见匹配的活跃承载"
-                : "请求前承载基线未知；原生空缓存不能证明没有已有承载");
-            emit(s, "请求前本地计数/冷却：" + s.quotaBefore);
-            if ((Boolean) XposedHelpers.callMethod(singleton(timerClass), "hasExistIp", info)) {
-                s.e.localCode = 203;
-                emit(s, "已存在同类 IP/QCI 的原生请求，保留重复请求保护，未重复发送");
-                return;
-            }
-            try {
-                XposedHelpers.callMethod(singleton(linkClass), "reportDedicatedBearRequest", slot, 1);
-                s.monitorStarted = true;
-            } catch (Throwable t) { event("请求承载监测未启动：" + describe(t)); }
-            Handler callback = new Handler(worker.getLooper(), msg -> {
-                if (active != s) return true;
-                s.e.engineFinished = true;
-                if (s.quotaAfter.length() == 0) s.quotaAfter = quotaSnapshot();
-                try {
-                    Object result = msg.obj;
-                    Object nativeCode = result == null ? null : XposedHelpers.getObjectField(result, "userObj");
-                    s.nativeResult = nativeCode instanceof Integer ? (Integer) nativeCode : null;
-                    emit(s, "原生完成映射结果：" + s.nativeResult + "（不作为云端成功证据）");
-                } catch (Throwable t) { event("读取原生完成回调失败：" + describe(t)); }
-                return true;
-            });
-            initiating.set(s);
-            s.sentAt = System.currentTimeMillis();
-            s.sentElapsed = SystemClock.elapsedRealtime();
-            try { XposedHelpers.callMethod(manager, "requestDedicatedBearer", info, callback.obtainMessage(9413)); }
-            finally { initiating.remove(); }
-            if (s.e.localCode == null) {
-                s.e.error = "未观察到原生校验 Hook 命中，无法确认本次绕过；请导出诊断核对 LSPosed 运行版本";
-            }
-            s.applyId = clean(XposedHelpers.callMethod(info, "getApplyId"));
-            emit(s, "已调用原生 requestDedicatedBearer；校验返回 " + s.e.localCode);
-            worker.postDelayed(() -> monitor(s), 2000L);
-        } catch (Throwable t) {
-            Session s = active;
-            if (s != null && s.id.equals(id)) { s.e.error = describe(t); emit(s, "请求异常：" + s.e.error); releaseMonitor(s); }
-            else publish(json("lastCommandError", describe(t)), "未发送：" + describe(t));
-        }
     }
     private boolean terminal(Session s) {
         OutcomePolicy.Result r = OutcomePolicy.decide(s.e);
@@ -694,51 +739,33 @@ public final class NativeBackend {
             || r == OutcomePolicy.Result.BEARER_TIMEOUT || r == OutcomePolicy.Result.ENDED;
     }
     private void monitor(Session s) {
-        if (active != s) return;
+        if (sessions.get(s.requestInfo) != s) return;
         long elapsed = SystemClock.elapsedRealtime() - s.startedElapsed;
         if (elapsed >= 120000L && !(s.e.bearerFresh && s.e.bearerActive && s.e.cloudReceived && Integer.valueOf(200).equals(s.e.cloudCode))) s.e.timedOut = true;
         refresh();
         emit(s, null);
-        if (terminal(s) || (s.e.timedOut && !s.e.cloudReceived)) { releaseMonitor(s); return; }
+        if (terminal(s) || (s.e.timedOut && !s.e.cloudReceived)) return;
         if (elapsed > s.duration * 60000L + 120000L) {
             s.e.ended = true;
             emit(s, "观察时段结束；最终网络状态以系统回报为准");
-            releaseMonitor(s); return;
+            return;
         }
         worker.postDelayed(() -> monitor(s), elapsed < 120000L ? 2000L : 10000L);
     }
-    private void stopObservation() {
-        Session s = active;
-        if (s != null) { s.e.ended = true; emit(s, "已停止本次观察；已提交的请求由原生服务继续处理"); releaseMonitor(s); }
-    }
-    private void releaseMonitor(Session s) {
-        if (!s.monitorStarted) return;
-        try {
-            JSONArray cached = listJson((List<?>) XposedHelpers.callMethod(singleton(linkClass), "getDedicatedBearInfoList", s.slot));
-            boolean anyActive = false;
-            for (int i = 0; i < cached.length(); i++) {
-                JSONObject b = cached.optJSONObject(i);
-                if (b != null && b.optInt("type") == 2 && b.optInt("state") == 1) anyActive = true;
-            }
-            if (anyActive || (Boolean) XposedHelpers.callMethod(manager, "isDBWorking", s.slot)) return;
-            s.monitorStarted = false;
-            XposedHelpers.callMethod(singleton(linkClass), "reportDedicatedBearRequest", s.slot, 2);
-        }
-        catch (Throwable t) { event("结束承载监测失败：" + describe(t)); }
-    }
     private void emit(Session s, String event) {
-        if (active != s) return;
         publish(json("sessionId", s.id, "startedAt", s.startedAt, "requestSlot", s.slot, "requestedQci", s.qci,
             "requestSentAt", s.sentAt, "operator", s.carrier, "plmn", s.plmn, "telecomRequired", s.telecomRequired,
-            "requestedMinutes", 30, "returnedMinutes", s.returnedDuration, "bypass", s.bypass, "localCode", s.e.localCode,
-            "qosBypassApplied", s.localBypassApplied,
+            "requestedMinutes", s.requestedMinutes, "returnedMinutes", s.returnedDuration, "bypass", s.bypass, "localCode", s.e.localCode,
+            "qosBypassApplied", s.localBypassApplied, "commonBypassApplied", s.commonBypassApplied,
+            "requestMode", "SYSTEM_NATIVE_AUTO", "nativeScene", s.scene, "nativeCause", s.cause,
+            "nativeOrigin", s.origin == null ? new JSONObject() : s.origin.json(),
             "engineFinished", s.e.engineFinished, "nativeResult", s.nativeResult, "cloudReceived", s.e.cloudReceived,
             "cloudCode", s.e.cloudCode, "cloudTransport", s.transport, "cloudMessage", s.msg, "remoteMessage", s.remoteMsg,
             "cloudRaw", s.cloudRaw, "telecom", s.telecom, "telecomHttp", s.telecomHttp,
             "telecomErrorCode", s.telecomErrorCode, "telecomErrorMessage", s.telecomErrorMessage,
             "sessionBearers", s.bearers, "bearerAt", s.bearerAt, "bearerFresh", s.e.bearerFresh,
             "bearerActive", s.e.bearerActive, "baselineActive", s.e.baselineActive, "timedOut", s.e.timedOut,
-            "baselineKnown", s.e.baselineKnown,
+            "baselineKnown", s.e.baselineKnown, "attributionUncertain", s.e.attributionUncertain,
             "ended", s.e.ended, "error", s.e.error, "applyId", s.applyId,
             "verdict", OutcomePolicy.decide(s.e).name(), "sessionOpen", !terminal(s),
             "requestAudit", s.requestAudit, "httpResponse", s.httpResponse, "httpStatus", s.e.httpStatus,
@@ -746,14 +773,15 @@ public final class NativeBackend {
             "quotaBefore", s.quotaBefore, "quotaAfter", s.quotaAfter, "commonCloudChecks", s.commonChecks,
             "preflight", s.preflight,
             "moduleVersion", Protocol.VERSION, "backendSeenAt", System.currentTimeMillis()),
-            event == null ? null : "[" + s.id.substring(0, 8) + "] " + event);
+            event == null ? null : "[" + s.id.substring(0, 8) + "] " + event, s != active);
     }
     private void event(String value) { publish(new JSONObject(), value); }
-    private void publish(JSONObject patch, String event) {
+    private void publish(JSONObject patch, String event) { publish(patch, event, false); }
+    private void publish(JSONObject patch, String event, boolean archiveOnly) {
         try {
             Bundle b = new Bundle(); b.putString("patch", patch.toString());
             if (event != null) b.putString("event", clean(event));
-            Bundle result = context.getContentResolver().call(Protocol.BRIDGE, "publish", null, b);
+            Bundle result = context.getContentResolver().call(Protocol.BRIDGE, archiveOnly ? "archive" : "publish", null, b);
             if (result != null && result.containsKey("error")) XposedBridge.log("FastPass bridge: " + result.getString("error"));
         } catch (Throwable t) { XposedBridge.log("FastPass bridge unavailable: " + t.getClass().getSimpleName()); }
     }

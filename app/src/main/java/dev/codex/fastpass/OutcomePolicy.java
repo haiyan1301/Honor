@@ -10,7 +10,7 @@ public final class OutcomePolicy {
     public static final class Evidence {
         public boolean requested, engineFinished, cloudReceived, telecomFailed;
         public boolean bearerActive, bearerFresh, baselineActive, timedOut, ended;
-        public boolean baselineKnown;
+        public boolean baselineKnown, attributionUncertain;
         public Integer cloudCode, localCode, httpStatus, commonLocalCode;
         public String error;
     }
@@ -25,7 +25,7 @@ public final class OutcomePolicy {
         if (e.ended) return Result.ENDED;
         if (e.timedOut) return Result.BEARER_TIMEOUT;
         if (e.cloudReceived && e.cloudCode != null && e.cloudCode == 200 && e.bearerActive && e.bearerFresh) {
-            return e.baselineActive || !e.baselineKnown ? Result.ACTIVE_PREEXISTING : Result.CONFIRMED;
+            return e.baselineActive || !e.baselineKnown || e.attributionUncertain ? Result.ACTIVE_PREEXISTING : Result.CONFIRMED;
         }
         if (e.engineFinished && !e.cloudReceived) return Result.TRANSPORT_UNCONFIRMED;
         if (e.localCode == null) return Result.PREPARING;

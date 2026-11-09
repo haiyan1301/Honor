@@ -1,0 +1,26 @@
+{
+  "package": "dev.codex.fastpass",
+  "version": "1.2.0",
+  "versionCode": 3,
+  "label": "优速通观察台",
+  "minSdk": "33",
+  "targetSdk": "36",
+  "permissions": [
+    "dev.codex.fastpass.permission.CONTROL"
+  ],
+  "mode": "SYSTEM_NATIVE_AUTO",
+  "module_constructs_or_submits_requests": false,
+  "native_parameters_preserved": true,
+  "native_callback_and_lifecycle_preserved": true,
+  "auto_mode_initial_default": false,
+  "sha256": "5cbcb0490cbed4dec1249fcd9d580317e5e13d199a3c19ceaa0fcc6c4f3c9607",
+  "bytes": 66077,
+  "signature_v3": true,
+  "same_signer_as_1_1_0": true,
+  "domain_checks": 41,
+  "auto_policy_index_checks": 37,
+  "wire_radio_checks": 31,
+  "native_contract_checks": 121,
+  "architecture_checks": 12,
+  "device_tested_1_2_0": false
+}

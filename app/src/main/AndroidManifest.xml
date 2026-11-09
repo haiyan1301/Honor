@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:versionCode="2" android:versionName="1.1.0">
+    android:versionCode="3" android:versionName="1.2.0">
     <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="36"/>
     <permission android:name="dev.codex.fastpass.permission.CONTROL" android:protectionLevel="signature"/>
     <uses-permission android:name="dev.codex.fastpass.permission.CONTROL"/>
@@ -16,7 +16,7 @@
         android:supportsRtl="true" android:extractNativeLibs="false">
         <meta-data android:name="xposedmodule" android:value="true"/>
         <meta-data android:name="xposedminversion" android:value="82"/>
-        <meta-data android:name="xposeddescription" android:value="荣耀优速通原生请求、单次本地检查绕过、云端原始返回与真实专用承载观察。适配系统服务 70.1.0.1。"/>
+        <meta-data android:name="xposeddescription" android:value="荣耀优速通系统原生自动场景、局部阻止条件放行、原始云端返回与真实 QoS 观察。适配系统服务 70.1.0.1。"/>
         <meta-data android:name="xposedscope" android:resource="@array/xposed_scope"/>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

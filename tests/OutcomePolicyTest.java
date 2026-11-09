@@ -56,7 +56,11 @@ public final class OutcomePolicyTest {
         result("shared local quota failure is not a cloud response", OutcomePolicy.Result.COMMON_LOCAL_REJECTED, e);
         e.commonLocalCode = 1004;
         result("shared local check passed keeps waiting", OutcomePolicy.Result.WAITING, e);
+        e.cloudReceived = true; e.cloudCode = 200; e.bearerActive = true; e.bearerFresh = true; e.attributionUncertain = true;
+        result("SIM change keeps attribution uncertain", OutcomePolicy.Result.ACTIVE_PREEXISTING, e);
         check("active dedicated QCI6", OutcomePolicy.matches(2, 6, 1, 6));
+        check("native Gaming QCI3 can match", OutcomePolicy.matches(2, 3, 1, 3));
+        check("QCI6 cannot substitute native Gaming QCI3", !OutcomePolicy.matches(2, 6, 1, 3));
         check("VIP QCI6 is not requested dedicated bearer", !OutcomePolicy.matches(1, 6, 1, 6));
         check("wrong QCI", !OutcomePolicy.matches(2, 4, 1, 6));
         check("inactive QCI6", !OutcomePolicy.matches(2, 6, 0, 6));
